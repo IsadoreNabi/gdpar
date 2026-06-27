@@ -1,0 +1,384 @@
+---
+title: "**Theoretical Addendum -- Block 2:**"
+subtitle: "Gnoseological Validity Conditions for the Population Reference"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{Gnoseological Validity Conditions for the Population Reference}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+---
+
+# **1. Purpose**
+
+Block 1 settled the conditions under which the components of the AMM decomposition $\theta_i = \theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}})$ are identifiable from the latent function and from observable data. It treated $\theta_{\text{ref}}$ as a parameter to be estimated, on a par with $a, b, W$. This block addresses a complementary and logically prior question: **under what conditions does $\theta_{\text{ref}}$ function as a faithful aggregate of the population it is meant to describe, rather than as a numerical artifact computable in any case but not interpretable as such?**
+
+The question is not whether $\mathbb{E}_\mu[\theta_i]$ exists as an integral ---under (C5) of Block 1, it always does--- but whether that integral expresses an interpretable population-level pattern. The integral can exist while the population it averages over is heterogeneous in ways the framework does not capture, while the data-generating process drifts through qualitatively distinct regimes during observation, or while individuals with extreme deviations are in fact members of a different population mixed into the data. In any of those cases, $\theta_{\text{ref}}$ remains computable but ceases to be **gnoseologically valid**: it does not faithfully express the system's aggregate structure.
+
+This block formalizes three structural conditions under which $\theta_{\text{ref}}$ is gnoseologically valid, organizes the validity question into three layers parallel to those of Block 1, states one theorem and one lemma with explicit hypotheses, and gives a battery of empirical diagnostics that detect specific violations and translate the abstract validity question into runtime checks. The treatment is designed so that the framework carries its own diagnostic of validity inside, rather than relying on philosophical assumptions about the population.
+
+---
+
+# **2. Gnoseological vs. Ontological Status of the Reference**
+
+The objection traceable to Galton, that the "average individual" need not exist as an ontological entity in the population, is correct. There need not be any individual whose covariates equal the population mean, and for nonlinear parameter functions, there need not be an individual whose parameter equals $\mathbb{E}[\theta_i]$. **The framework does not assert otherwise.**
+
+The framework treats $\theta_{\text{ref}}$ as a **gnoseological aggregate**: an objective expression of the system's aggregate structure under conditions of validity, not the property of any particular individual. The status is analogous to the role of the average rate of profit in classical political economy or the average reaction time in cognitive psychology: a real feature of the aggregate that need not belong to any single component. Conditions of validity convert this from a philosophical posture into a verifiable statistical claim.
+
+We adopt the following operational definition:
+
+> **Gnoseological validity (definition).** $\theta_{\text{ref}}$ is gnoseologically valid for a population $\mu$ when:
+>
+> (a) the population is structurally homogeneous at the parameter level, in a sense made precise below;
+> (b) the data-generating process operates in a single regime during the observation window;
+> (c) individual deviations $\Delta_i$ are interpretable within the regime, not as evidence of belonging to a different population.
+>
+> When these three conditions hold, $\theta_{\text{ref}}$ functions as the system's aggregate ontology. When they fail, $\theta_{\text{ref}}$ exists as a number but does not express the aggregate as a real abstraction.
+
+The conditions are made formal in Section 3 and translated into hypotheses with checkable consequences. Section 7 gives the diagnostic battery that detects violations.
+
+---
+
+# **3. Three Structural Conditions**
+
+We collect the structural conditions under which $\theta_{\text{ref}}$ is gnoseologically valid. Each is named, formally stated, motivated, and connected to a failure mode.
+
+## **3.1. (HOM) No Latent Stratification at the Parameter Level**
+
+> **(HOM) No latent stratification at the parameter level.** There exists no random variable $Z$ on $\Omega$ ---a latent grouping that is **not** $\sigma(X)$-measurable, i.e., not a deterministic function of the observed covariates--- and no measurable partition of its range $\{\mathcal{Z}_k\}_{k=1}^K$ with $K \geq 2$ and $P(Z \in \mathcal{Z}_k) > 0$ for all $k$, such that the latent-conditional references
+> $$\theta_{\text{ref}}^{(k)} \;:=\; \mathbb{E}[\theta_i \mid Z \in \mathcal{Z}_k]$$
+> differ across $k$.
+
+**Motivation.** (HOM) is the formal statement that the population is structurally homogeneous at the parameter level: no hidden grouping splits it into distinct sub-populations with different references. The latent variable $Z$ is *unobserved*; if it were observable, it would be part of $X$ and the AMM would absorb its effect through $\Delta(x_i, \theta_{\text{ref}})$. (HOM) excludes the case in which a relevant grouping exists outside the observed covariate space and produces sub-populations with structurally distinct references.
+
+The condition is **not circular**: it does not depend on what the AMM "can represent" but on whether a latent stratifying variable exists. If such a variable exists, the marginal mean $\mathbb{E}_\mu[\theta_i]$ is a mixture-weighted aggregate of the sub-population references and is faithful to none of them, regardless of how rich $\Delta$ is.
+
+**Failure mode.** Two countries with different driving cultures pooled into one dataset, with country not recorded as a covariate; two patient populations with different baseline disease severities mixed in a clinical trial, with the relevant subtype unrecorded; two market segments with different price-elasticity baselines combined in a sales dataset, with segment unobserved.
+
+**Detectability.** Failure of (HOM) leaves a footprint detectable from data: the residual structure of fitted $\widehat{\theta}_i$ exhibits clustering not explained by observed $X$. Section 7.1 makes this operational.
+
+## **3.2. (REG) Regime Stability**
+
+> **(REG) Regime stability over the observation window.** During the period in which $\{(x_i, y_i)\}_{i=1}^n$ are collected, the data-generating process operates in a single regime, formalized as: there exists a single $\theta_*$ and a single deviation function $\Delta(\cdot, \theta_*)$ that govern the generation of all observations in the sample.
+
+**Motivation.** (REG) excludes regime change. If the population reference $\theta_*$ shifts during data collection ---due to policy change, technological transition, structural break, exogenous shock--- the framework averages across regimes and the fitted $\theta_{\text{ref}}$ is the time-weighted mean of two distinct references, faithful to neither.
+
+**Failure mode.** A clinical dataset spanning a guideline change in treatment protocol; an economic time series across a recession; a behavioral panel before and after a policy reform.
+
+For purely cross-sectional data without natural temporal ordering, (REG) reduces to the assumption that data collection episodes did not span a regime transition unrecorded in the covariates. The framework treats this as an operationally testable assumption when timestamps are available.
+
+## **3.3. (CLOS) Operational Closure of the Regime**
+
+> **(CLOS) Operational closure.** Fix a tail-fraction $\rho \in (0, 1)$ and a significance level $\alpha \in (0, 1)$ in advance ---the framework defaults are $\rho = 0.05$ and $\alpha = 0.05$. Let $\tau_\rho$ be the empirical $(1 - \rho)$-quantile of $\{\|\Delta_i\|\}_{i=1}^n$, and define
+> $$\mathcal{I}_{\tau_\rho} \;=\; \{i : \|\Delta_i\| > \tau_\rho\}, \qquad \mathcal{I}_{\tau_\rho}^c \;=\; \{i : \|\Delta_i\| \leq \tau_\rho\}.$$
+> Let $\widehat{\mathrm{MMD}}^2$ be the Maximum Mean Discrepancy estimator (Gretton et al. 2012) between the empirical distributions of $X$ on $\mathcal{I}_{\tau_\rho}$ and on $\mathcal{I}_{\tau_\rho}^c$, computed with a Gaussian kernel whose bandwidth is selected by the median heuristic. Let $q_{1-\alpha}$ be the $(1-\alpha)$-quantile of the null distribution of $\widehat{\mathrm{MMD}}^2$ obtained by the standard permutation procedure of Gretton et al. (2012, §6).
+>
+> **(CLOS) holds at level $(\rho, \alpha)$ when** $\widehat{\mathrm{MMD}}^2 \leq q_{1-\alpha}$ ---i.e., the permutation-based MMD test does not reject equality of the two empirical covariate distributions.
+
+**Motivation.** (CLOS) requires extreme individual deviations to be tail behavior of the regime, not membership in a different regime. The operational form is empirically checkable: extremes are within-regime if and only if they look statistically like the rest of the population in their covariate profile. When they do **not** look like the rest, the framework is plausibly misclassifying members of a different regime as tail outliers of the present one.
+
+**Failure mode.** A cohort of patients with rare disease subtype mixed into a general patient population, with the subtype's extreme parameter values absorbed as "outliers" by the framework; a subset of vehicles with engine modifications in a general automotive dataset, whose deviations are misread as within-regime extremes; a subset of users with structurally distinct usage patterns absorbed as outliers in a behavioral dataset.
+
+**Relation to (HOM).** (CLOS) is logically related to (HOM) but operates at a different level: (HOM) concerns the bulk of the distribution being a single regime; (CLOS) concerns extreme deviations being tail behavior of that regime rather than evidence of a second one. A population can satisfy (HOM) (no latent stratification of the bulk) but fail (CLOS) (a small but distinct subgroup is misread as tail extremes), or vice versa.
+
+---
+
+# **4. Three Layers of Gnoseological Validity**
+
+Parallel to Block 1, the validity question separates into three logically distinct layers.
+
+**(V-L1) Algebraic-functional validity.** Does the integral $\theta_{\text{ref}} = \mathbb{E}_\mu[\theta_i]$, taken over the population distribution, faithfully represent the system's aggregate parameter? This is a question about the mathematical structure of the population, independent of estimation.
+
+**(V-L2) Statistical validity.** Does the empirical estimator of $\theta_{\text{ref}}$ converge to the gnoseologically valid aggregate as $n$ grows? This bridges (V-L1) to data via the consistency of the framework's estimation procedure.
+
+**(V-L3) Diagnostic detectability.** Can violations of the validity conditions be detected from observable data? This translates the abstract conditions into runtime checks.
+
+We treat each layer in turn.
+
+---
+
+# **5. Proposition 2A: Algebraic-Functional Status of the Reference**
+
+The result that follows is a structural identity, not a deep theorem. It records what (HOM) buys at the algebraic level and what its failure entails. We name it **Proposition** to keep the modesty of the claim explicit.
+
+> **Proposition 2A.** Assume (C1)-(C5) of Block 1 and that the population is governed by the AMM $\theta_i = \theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}})$ with $\theta_{\text{ref}} = \mathbb{E}_\mu[\theta_i]$.
+>
+> **(a) Under (HOM)** (no latent stratification, Section 3.1): for every partition $\{\mathcal{X}_k\}$ of $\mathcal{X}$ into measurable pieces of positive $\mu$-measure ---i.e., every partition based on the **observed** covariates---, the conditional sub-population reference decomposes as
+> $$\theta_{\text{ref}}^{(k)} \;:=\; \mathbb{E}_{\mu \mid \mathcal{X}_k}[\theta_i] \;=\; \theta_{\text{ref}} + \mathbb{E}_{\mu \mid \mathcal{X}_k}[\Delta(X, \theta_{\text{ref}})].$$
+> The shift from $\theta_{\text{ref}}$ to $\theta_{\text{ref}}^{(k)}$ is the conditional mean of the AMM deviation function within the piece $\mathcal{X}_k$. **The single $\theta_{\text{ref}}$ remains the structural reference of the population**: no observed-covariate partition produces an alternative reference structurally distinct from $\theta_{\text{ref}}$.
+>
+> **(b) Under failure of (HOM):** by Section 3.1, there exists a latent variable $Z$ and a partition $\{\mathcal{Z}_k\}_{k=1}^K$ of its range with $K \geq 2$ such that the latent-conditional references $\theta_{\text{ref}}^{(k)} := \mathbb{E}[\theta_i \mid Z \in \mathcal{Z}_k]$ differ across $k$. The marginal reference is then a mixture-weighted aggregate of distinct sub-population references:
+> $$\theta_{\text{ref}} \;=\; \mathbb{E}_\mu[\theta_i] \;=\; \sum_{k=1}^K P(Z \in \mathcal{Z}_k)\, \theta_{\text{ref}}^{(k)}, \qquad \theta_{\text{ref}}^{(k)} \neq \theta_{\text{ref}} \text{ for at least one } k.$$
+> No single $\theta_{\text{ref}}$ functions as a structural reference of the entire population: the marginal $\theta_{\text{ref}}$ is a centroid of distinct aggregates, structurally faithful to none of them.
+
+*Proof.*
+
+(a) By the law of total expectation:
+$$\mathbb{E}_{\mu \mid \mathcal{X}_k}[\theta_i] \;=\; \mathbb{E}_{\mu \mid \mathcal{X}_k}[\theta_{\text{ref}} + \Delta(X, \theta_{\text{ref}})] \;=\; \theta_{\text{ref}} + \mathbb{E}_{\mu \mid \mathcal{X}_k}[\Delta(X, \theta_{\text{ref}})].$$
+The shift is well-defined as a conditional mean. **This is an identity, not a theorem**: it follows directly from linearity of expectation. Its content is that the partition-level reference shifts only by a quantity expressible inside the AMM ---i.e., partitioning by observed covariates does not introduce a structural reference that competes with $\theta_{\text{ref}}$.
+
+(b) By failure of (HOM), the latent variable $Z$ and partition $\{\mathcal{Z}_k\}$ exist with $\theta_{\text{ref}}^{(k)} \neq \theta_{\text{ref}}^{(\ell)}$ for some $k \neq \ell$. The law of total expectation gives the mixture identity:
+$$\mathbb{E}_\mu[\theta_i] \;=\; \sum_{k=1}^K P(Z \in \mathcal{Z}_k)\, \mathbb{E}[\theta_i \mid Z \in \mathcal{Z}_k] \;=\; \sum_{k=1}^K P(Z \in \mathcal{Z}_k)\, \theta_{\text{ref}}^{(k)}.$$
+The marginal $\theta_{\text{ref}}$ equals a convex combination of distinct $\theta_{\text{ref}}^{(k)}$ values, and is therefore equal to at most one of them; in general, equal to none. $\square$
+
+**Plain reading.** Under (HOM), the population can be partitioned by observed covariates without producing structurally distinct alternative references: every sub-population is anchored by $\theta_{\text{ref}}$ shifted by a within-AMM offset. Under failure of (HOM), latent partitions exist that produce structurally distinct references, and the marginal $\theta_{\text{ref}}$ is the mixture-weighted centroid of these references rather than the structural reference of any one of them.
+
+**Scope.** Proposition 2A is a structural identity at the algebraic-functional level. It does not by itself characterize the *interpretability* of $\theta_{\text{ref}}$ as a real abstraction ---that requires the joint hypothesis (HOM)+(REG)+(CLOS) and the diagnostic battery of Section 7. (a) is the cleanest version of the within-AMM partition invariance that (HOM) buys; (b) records the precise structural shape of failure.
+
+**Caveat.** Proposition 2A assumes the population is governed by the AMM, i.e., that $\theta_i = \theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}})$ holds at the population level for some admissible $\Delta$. In purely descriptive settings this is uncontroversial; in causal or counterfactual settings, the existence of a population-level $\theta_i$ object requires additional structural assumptions (Block 8 treats this in connection with the CATE/ITE literature).
+
+---
+
+# **6. Lemma 2B: Statistical Consistency of the Empirical Reference Estimator**
+
+> **Lemma 2B.** Assume:
+>
+> - The hypotheses of Proposition 2A hold (so the population is governed by the AMM and (HOM) holds).
+> - **(REG)** holds during the observation window.
+> - The hypotheses of Theorem 1A and Lemma 1B of Block 1 hold (so the parameters are identifiable from data).
+> - **(IID)** The sample $\{(x_i, y_i)\}_{i=1}^n$ is i.i.d. from the joint distribution induced by $X \sim \mu$ and $Y \mid X \sim \mathcal{D}(\theta_*(X, \theta_{\text{ref}}))$. The current implementation of the framework assumes (IID); extensions to dependent data ---time-series and spatial--- would replace (IID) with an ergodicity/mixing condition under which a strong law of large numbers applies, but these extensions are scoped for a future block and not covered by the present release.
+> - **(REG-EST) Mean-error individual consistency.** The chosen estimation path satisfies the regularity conditions under which the average individual error vanishes in probability:
+> $$\frac{1}{n} \sum_{i=1}^n \bigl\| \widehat{\theta}_i - \theta_*(x_i, \theta_{\text{ref}}) \bigr\| \;\xrightarrow{P}\; 0 \quad \text{as } n \to \infty.$$
+> This is the version of consistency required by Stage 2's argument and is supported by all three paths under their respective regularity conditions: Path 1 via posterior contraction (Ghosal and van der Vaart 2017), Path 2 via spline/kernel mean-error rates (Fan and Zhang 2008; Stone 1985), Path 3 via PAC-Bayes and NTK average-error bounds (Dziugaite and Roy 2017; Bach 2017). The formal statements appear in Blocks 4-6.
+>
+> A **strictly stronger uniform version** ---
+> $$\sup_{i \in \{1, \ldots, n\}} \,\bigl\| \widehat{\theta}_i - \theta_*(x_i, \theta_{\text{ref}}) \bigr\| \;\xrightarrow{P}\; 0$$
+> ---holds under stronger regularity for Paths 1 and 2 (Path 1: posterior contraction in sup-norm under Ghosal-van der Vaart compactness conditions; Path 2: uniform spline-rate results of Stone 1985 and uniform kernel-rate results of Hansen 2008). For Path 3, the uniform version is **not** established in current Bayesian neural network theory; the average version is the honest level at which Path 3 supports Lemma 2B's conclusion.
+>
+> Then the empirical reference estimator
+> $$\widehat{\theta}_{\text{ref}, n} \;:=\; \frac{1}{n} \sum_{i=1}^n \widehat{\theta}_i$$
+> converges in probability to $\theta_{\text{ref}}$ as $n \to \infty$.
+>
+> Under failure of (HOM) or (REG) (with the other hypotheses retained), the same estimator converges in probability to a limit that is **not** the gnoseologically valid reference of any single sub-population or regime: it is a mixture-weighted aggregate of distinct references with no structural interpretation.
+
+*Proof.* The argument has two stages, each carrying its own regularity, with (IID) and (REG-EST) playing distinct technical roles.
+
+**Stage 1: Mean-error individual consistency.** This is the conclusion of (REG-EST). Under (HOM), (REG), identifiability via Theorem 1A and Lemma 1B, and the regularity of the chosen estimation path:
+$$\frac{1}{n} \sum_{i=1}^n \bigl\| \widehat{\theta}_i - \theta_*(x_i, \theta_{\text{ref}}) \bigr\| \;\xrightarrow{P}\; 0.$$
+The role of (HOM)+(REG) here is to ensure **correct specification**: without (HOM) the model is mis-specified at the population level (a mixture is treated as a single regime); without (REG) the model is mis-specified across the observation window (two regimes are treated as one). Either failure breaks (REG-EST)'s premise of correct specification and Stage 1 collapses.
+
+**Stage 2: Averaging via the law of large numbers.** From Stage 1, the empirical mean of fitted values differs from the empirical mean of true values by an error that vanishes in probability:
+$$\frac{1}{n} \sum_{i=1}^n \widehat{\theta}_i \;-\; \frac{1}{n} \sum_{i=1}^n \theta_*(x_i, \theta_{\text{ref}}) \;\leq\; \frac{1}{n} \sum_{i=1}^n \bigl\| \widehat{\theta}_i - \theta_*(x_i, \theta_{\text{ref}}) \bigr\| \;\xrightarrow{P}\; 0,$$
+by triangle inequality and (REG-EST). By **(IID)**, the random variables $\{\theta_*(X_i, \theta_{\text{ref}})\}_{i=1}^n$ are i.i.d. from a distribution with finite mean (under (C5) of Block 1, $\mathbb{E}\|\theta_*(X, \theta_{\text{ref}})\| < \infty$). Kolmogorov's SLLN (Durrett 2019, §2.4) then yields
+$$\frac{1}{n} \sum_{i=1}^n \theta_*(x_i, \theta_{\text{ref}}) \;\xrightarrow{P}\; \mathbb{E}_\mu[\theta_*(X, \theta_{\text{ref}})].$$
+By Corollary 1 of Block 1 (centering of the framework), $\mathbb{E}_\mu[\theta_*(X, \theta_{\text{ref}})] = \theta_{\text{ref}}$. Combining: $\widehat{\theta}_{\text{ref}, n} \xrightarrow{P} \theta_{\text{ref}}$.
+
+**Failure analysis.**
+
+- *Without (HOM):* Stage 1 fails because the model is mis-specified at the population level. The fitted $\widehat{\theta}_i$ converges to a pseudo-true parameter (White 1982), and Stage 2 yields the mixture-weighted aggregate $\sum_k P(Z \in \mathcal{Z}_k) \theta_{\text{ref}}^{(k)}$ of Proposition 2A(b).
+- *Without (REG):* Stage 1 fails because the regime is not constant. Fitted $\widehat{\theta}_i$ for individuals in different regime windows converges to different pseudo-true values; Stage 2 yields a time-weighted average of regime references.
+- *Without (REG-EST):* Stage 1 fails outright; the estimator may have no probability limit.
+- *Without (IID) or its ergodic replacement:* Stage 1 may still hold but Stage 2's SLLN does not apply, and the empirical mean of the $\theta_*(x_i, \theta_{\text{ref}})$ may fail to converge to $\mathbb{E}_\mu[\theta_*(X, \theta_{\text{ref}})]$. The estimator's probability limit is then not generally $\theta_{\text{ref}}$. $\square$
+
+**Plain reading.** Under (HOM)+(REG)+identifiability+(REG-EST), the standard empirical mean of fitted parameters is a consistent estimator of $\theta_{\text{ref}}$. The two-stage proof separates the individual-level consistency (Stage 1) from the averaging step (Stage 2): each stage requires its own regularity, and each stage breaks under different failure modes.
+
+**Crucial implication.** Convergence of the estimator does not, by itself, indicate gnoseological validity. Under failure of (HOM) or (REG), the estimator still converges in probability ---to the wrong limit. The framework needs the diagnostic battery of Section 7 to distinguish convergence to $\theta_{\text{ref}}$ from convergence to a mixture-weighted artifact.
+
+---
+
+# **7. Proposition 2C: Diagnostic Battery for the Three Conditions**
+
+This is the operational core of the block. Each of the three structural conditions has a corresponding empirical diagnostic. Together they form a battery: the framework runs all three after fitting and reports the verdict.
+
+## **7.1. Test for (HOM): Latent Mixture in the Posterior of $\theta_i$**
+
+If (HOM) fails, the population contains two or more sub-populations with systematically different references, and the posterior distribution of fitted $\widehat{\theta}_i$ should display **multimodal structure** that cannot be explained by individual-level variation in covariates alone.
+
+**Diagnostic.** After fitting, compute the empirical distribution of $\widehat{\theta}_i$ across the sample. Apply two complementary tests:
+
+(i) **Multimodality test.** Hartigan's dip test (Hartigan and Hartigan 1985) on each coordinate of $\widehat{\theta}_i$. Under (HOM), unimodality is expected; multimodality is a signal of latent stratification.
+
+(ii) **Residual mixture test.** Compute residuals $r_i = \widehat{\theta}_i - \widehat{\theta}_{\text{ref}} - \widehat{\Delta}(x_i, \widehat{\theta}_{\text{ref}})$ and test for clustering in $\{r_i\}$ unrelated to $x_i$. Significant clustering of residuals with structurally distinct covariate profiles signals a sub-population that the AMM decomposition does not absorb.
+
+**Reported output.** $p$-value of dip test per coordinate, plus a clustering quality index (silhouette coefficient or BIC ratio) for the residual mixture test.
+
+## **7.2. Test for (REG): Change-Point Detection on Fitted References**
+
+If (REG) fails and the data carry a temporal index $t$, the fitted reference within sub-windows should display a structural break.
+
+**Diagnostic.** Partition the data by time index into $L$ sliding windows, refit the framework on each window to obtain $\widehat{\theta}_{\text{ref}, \ell}$ for $\ell = 1, \ldots, L$, and apply change-point detection (Killick et al. 2012 PELT algorithm; Bayesian online change-point detection of Adams and MacKay 2007 if streaming) on the sequence.
+
+For data without temporal index, partition by data collection episode (when episodes are recorded as a covariate) and apply the same logic.
+
+**Reported output.** Detected change-points with their posterior probabilities (Bayesian) or test statistics (frequentist), and the fitted references in each segment.
+
+## **7.3. Test for (CLOS): Extreme-Deviation Profile Inspection**
+
+If (CLOS) fails, individuals with extreme $\widehat{\Delta}_i$ form a coherent subgroup with covariate profile systematically distinct from the bulk of the population.
+
+**Diagnostic.** Identify individuals with the top $\alpha$-quantile of $\|\widehat{\Delta}_i\|$ (default $\alpha = 0.05$). For these "extremes", compute the joint distribution of their covariates $X^{(\text{ext})}$ and compare with the distribution of covariates of the bulk $X^{(\text{bulk})}$.
+
+(i) **Mean comparison.** Compute $\mathbb{E}[X^{(\text{ext})}] - \mathbb{E}[X^{(\text{bulk})}]$ and test for significance using bootstrap (Efron 1979).
+
+(ii) **Distribution comparison.** Compute the maximum mean discrepancy (MMD; Gretton et al. 2012) between the empirical distributions of $X^{(\text{ext})}$ and $X^{(\text{bulk})}$.
+
+A significant difference in either measure flags that the extremes are **not** tail behavior of the regime but a structurally distinct subgroup.
+
+**Reported output.** $p$-values of mean difference per coordinate of $X$ and the MMD statistic with its bootstrap-derived critical value.
+
+## **7.4. Joint Verdict**
+
+The library reports a per-condition verdict:
+
+| Condition | Test | Verdict |
+|:----------|:-----|:--------|
+| (HOM) | Dip test + residual clustering | Pass / Caution / Fail |
+| (REG) | Change-point on time-windowed references | Pass / Caution / Fail |
+| (CLOS) | Extreme-deviation covariate profile | Pass / Caution / Fail |
+
+Together with a global verdict: **gnoseologically valid** if all three pass; **conditionally valid** if at most one is at "Caution"; **invalid** otherwise. When a condition fails, the verdict comes with a recommendation: refit on a single sub-population (HOM), restrict to a single regime window (REG), or model the extreme subgroup separately (CLOS).
+
+The diagnostic does not replace user judgment. An analyst with substantive prior knowledge may override the verdict (e.g., declaring the extremes scientifically interesting and worth retaining); the verdict makes the structural decision explicit rather than silent.
+
+---
+
+# **8. When Conditions Fail: Operational Consequences**
+
+The framework does not crash when conditions fail. The numerical procedures continue producing fitted values; the diagnostic battery flags the failure, and the user is informed of which condition is violated and what kind of object the fitted $\widehat{\theta}_{\text{ref}}$ is.
+
+**Failure of (HOM): refit per sub-population.** When the diagnostic detects latent stratification, the recommended remedy is to identify the sub-populations (typically via the residual cluster structure) and refit the framework separately on each. The framework supports this via a `group` argument in the fitting interface (see `?gdpar` and the `vop03_grouped_anchors` vignette) that produces parallel fits with shared structural assumptions but distinct $\widehat{\theta}_{\text{ref}}^{(k)}$.
+
+**Failure of (REG): time-windowed fitting.** When change-point detection signals regime shifts, the recommended remedy is to refit the framework on each detected regime separately. The framework does not currently provide a dedicated `regime` argument; the user obtains the same effect by partitioning the data by regime and calling `gdpar()` on each subset (or by using the `group` argument with regime labels as group identifiers).
+
+**Failure of (CLOS): outlier modelling.** When the extreme-deviation subgroup is structurally distinct, two strategies are available: (a) exclude the extreme individuals from the main fit and report results conditional on the regime defined by the bulk; (b) model the extremes as a separate regime and apply the (HOM)-failure remedy.
+
+In all three cases, the framework's response is **to expose** the validity failure, not to mask it as a successful fit on an ill-defined aggregate. This is the operational sense in which the validity diagnostic is internal to the framework.
+
+---
+
+# **9. Implementation Implications**
+
+The diagnostic battery is implemented as a mandatory post-fit step.
+
+### **9.1. Path 1 (Hierarchical Bayesian via Stan)**
+
+After MCMC sampling, the diagnostic battery runs on the posterior samples of $\widehat{\theta}_i$ (per individual, marginalizing over uncertainty). Multimodality tests use the median or mode of the posterior; clustering tests use the full posterior covariance. The Bayesian change-point detection of Adams and MacKay (2007) integrates naturally with the MCMC output.
+
+### **9.2. Path 2 (Varying-Coefficient via mgcv)**
+
+After fitting the spline-based VCM, the diagnostic battery runs on point estimates of $\widehat{\theta}_i$ together with their asymptotic standard errors (Wood 2017 provides these). Frequentist analogs of each test are used: PELT for change-point detection (Killick et al. 2012) and bootstrap-based covariate comparison.
+
+### **9.3. Path 3 (Hypernetwork via torch)**
+
+After training, the diagnostic battery runs on point predictions of $\Phi_\phi$ across the sample. Multiple training runs from different seeds (Section 6.8.1 of Block 1) provide an empirical posterior over $\widehat{\theta}_i$ values; the dip test and clustering operate on this empirical posterior.
+
+In all three paths, the verdict is reported in a single panel together with the AMM identifiability diagnostics from Block 1 (Proposition 1C), making the joint validity-and-identifiability state of the fit explicit.
+
+---
+
+# **10. Summary**
+
+This block has formalized:
+
+1. The **distinction between ontological and gnoseological status** of $\theta_{\text{ref}}$, with the explicit recognition that the average individual need not exist as an entity in the population without thereby invalidating $\theta_{\text{ref}}$ as an aggregate (Section 2).
+
+2. **Three structural conditions of validity** ---(HOM), (REG), (CLOS)--- each named, formally stated, motivated, and connected to a failure mode (Section 3).
+
+3. The **three layers of validity** ---algebraic-functional, statistical, diagnostic--- separating the validity question into logically distinct sub-questions (Section 4).
+
+4. **Proposition 2A** as a structural identity recording what (HOM) buys at the algebraic level: under (HOM), partitioning by observed covariates does not produce structurally distinct alternative references; under failure of (HOM), the marginal $\theta_{\text{ref}}$ is a mixture-weighted aggregate of distinct sub-population references (Section 5). The statement is presented as a Proposition, not a Theorem, to keep the modesty of the claim explicit.
+
+5. **Lemma 2B** establishing, via a two-stage proof (individual consistency followed by averaging), statistical consistency of the empirical reference estimator under (HOM)+(REG)+(REG-EST); without these, the estimator converges in probability to a mixture-weighted artifact rather than a structurally meaningful reference (Section 6).
+
+6. **Proposition 2C: a diagnostic battery** of three empirical tests, one per condition, with reported verdicts and remediation recommendations (Section 7).
+
+7. **Operational consequences** of each failure mode and the framework's exposure-not-masking response (Section 8).
+
+8. **Implementation** of the diagnostic battery in each of the three estimation paths (Section 9).
+
+The framework's claim is therefore not that $\theta_{\text{ref}}$ is universally valid as an aggregate ---it is not--- but that **the conditions of its validity are explicit, formalized, and empirically detectable from within the framework**. When the conditions hold, $\theta_{\text{ref}}$ functions as a real abstraction of the system. When they fail, the framework reports the failure rather than disguising it.
+
+---
+
+# **11. Connections to Subsequent Blocks**
+
+- **Block 3** (subsumption of standard models) verifies that the validity conditions of this block, when applied to special cases, recover the assumptions implicit in the standard models' uses.
+- **Blocks 4-6** (asymptotic theory) state consistency of fitted references for each estimation path; Lemma 2B is a particular instance of the general consistency results of those blocks.
+- **Block 7** (Empirical Bayes vs. Fully Bayes) treats the question of estimating $\theta_{\text{ref}}$ from the same data used to fit individual deviations, which interacts with (HOM) when the prior over $\theta_{\text{ref}}$ is itself estimated from heterogeneous data.
+- **Block 8** (CATE/ITE positioning) addresses the existence of $\theta_i$ as a population-level object in causal settings, where (HOM) acquires additional content related to ignorability and overlap conditions.
+
+---
+
+# **Appendix A. Notation**
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $\theta_{\text{ref}}$ | Population reference parameter |
+| $\theta_{\text{ref}}^{(k)}$ | Reference of sub-population $\mathcal{X}_k$ |
+| $\widehat{\theta}_{\text{ref}, n}$ | Empirical reference estimator |
+| $\widehat{\theta}_i$ | Fitted individual parameter |
+| $\widehat{\Delta}_i$ | Fitted individual deviation |
+| $\mathcal{X}_k$ | Measurable subset of $\mathcal{X}$ in a partition |
+| $\mu \mid \mathcal{X}_k$ | Conditional distribution of $X$ given $\mathcal{X}_k$ |
+| $W_k$ | Within-AMM offset of sub-population $\mathcal{X}_k$ |
+
+---
+
+# **Appendix B. Acronyms and Hypotheses**
+
+- **HOM**: No latent stratification at the parameter level.
+- **REG**: Regime stability over the observation window.
+- **CLOS**: Operational closure of the regime.
+- **MMD**: Maximum Mean Discrepancy.
+- **PELT**: Pruned Exact Linear Time (algorithm for change-point detection).
+
+| Hypothesis | Content |
+|:-----------|:--------|
+| (HOM) | No latent stratifying variable $Z$ producing distinct sub-population references |
+| (REG) | Single regime over the observation window (constant $\theta_*$ and $\Delta(\cdot, \theta_*)$) |
+| (CLOS) | MMD permutation test at level $(\rho, \alpha)$ does not reject equality of $X$-distributions on $\mathcal{I}_{\tau_\rho}$ vs. $\mathcal{I}_{\tau_\rho}^c$ |
+| (IID) | Sample i.i.d. from the model (extensions to ergodicity/mixing for time-series and spatial data are scoped for a future block) |
+| (REG-EST) | Mean-error consistency: $n^{-1} \sum_i \|\widehat{\theta}_i - \theta_*(x_i, \theta_{\text{ref}})\| \xrightarrow{P} 0$ (uniform sup-version stronger; supported by Paths 1 and 2 under additional regularity) |
+
+---
+
+# **References Cited in This Block**
+
+Adams, R. P., and MacKay, D. J. C. (2007). Bayesian online changepoint detection. arXiv:0710.3742.
+
+Bach, F. (2017). Breaking the curse of dimensionality with convex neural networks. *Journal of Machine Learning Research*, 18, 1--53.
+
+Durrett, R. (2019). *Probability: Theory and Examples*, 5th ed. Cambridge University Press.
+
+Dziugaite, G. K., and Roy, D. M. (2017). Computing nonvacuous generalization bounds for deep (stochastic) neural networks with many more parameters than training data. *Proceedings of UAI*.
+
+Efron, B. (1979). Bootstrap methods: Another look at the jackknife. *Annals of Statistics*, 7(1), 1--26.
+
+Fan, J., and Zhang, W. (2008). Statistical methods with varying coefficient models. *Statistics and Its Interface*, 1(1), 179--195.
+
+Ghosal, S., and van der Vaart, A. (2017). *Fundamentals of Nonparametric Bayesian Inference*. Cambridge University Press.
+
+Gretton, A., Borgwardt, K. M., Rasch, M. J., Schölkopf, B., and Smola, A. (2012). A kernel two-sample test. *Journal of Machine Learning Research*, 13, 723--773.
+
+Hansen, B. E. (2008). Uniform convergence rates for kernel estimation with dependent data. *Econometric Theory*, 24(3), 726--748.
+
+Stone, C. J. (1985). Additive regression and other nonparametric models. *Annals of Statistics*, 13(2), 689--705.
+
+Hartigan, J. A., and Hartigan, P. M. (1985). The dip test of unimodality. *Annals of Statistics*, 13(1), 70--84.
+
+Killick, R., Fearnhead, P., and Eckley, I. A. (2012). Optimal detection of changepoints with a linear computational cost. *Journal of the American Statistical Association*, 107(500), 1590--1598.
+
+White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1--25.
+
+Wood, S. N. (2017). *Generalized Additive Models: An Introduction with R*, 2nd ed. Chapman and Hall/CRC.

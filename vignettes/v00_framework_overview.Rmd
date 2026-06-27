@@ -1,0 +1,450 @@
+---
+title: "**Predictive Models with Dynamic Individual Parameters:**"
+subtitle: "A Unifying Conceptual Framework"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{Predictive Models with Dynamic Individual Parameters: A Unifying Conceptual Framework}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+---
+
+# **1. Motivation: From Cognition to Statistics**
+
+## **1.1. An Empirical Observation**
+
+The starting point of this framework is an observation about how a human predictor operates in real time under high uncertainty and severe consequences: a driver executing high-speed overtaking maneuvers at narrow distances and not crashing.
+
+The question is structural: why does the driver succeed? The answer reveals a predictive structure that conventional statistical models do not replicate explicitly.
+
+## **1.2. The Cognitive Structure of the Process**
+
+The predictive process executed by an experienced driver consists of three stages:
+
+1. **Understanding the population reference.** The driver carries an internal model of the *average driver* in a given country: typical reaction times, modal aggressiveness or caution, characteristic patterns of acceleration, braking, lane-changing. This population model functions as a *prior*.
+
+2. **Rapid identification of individual deviation.** Within a one- or two-second window, the driver observes signals from the specific other driver ---driving style, relative speed, type of vehicle, micro-movements of the steering wheel--- and from these signals estimates how and how much the specific driver deviates from the average. More aggressive? More cautious? More impatient? Does the vehicle allow bolder maneuvers?
+
+3. **Conditional prediction and decision.** With the individual profile estimated ---always defined as a deviation relative to the average--- the driver predicts: "If an average driver behaves in such-and-such a way, and this driver differs in this fashion, then in this situation the driver will or will not accelerate, will or will not slow down, will or will not move out of the current trajectory." On that prediction, a maneuver is decided.
+
+## **1.3. What Distinguishes This Process from a Standard Model**
+
+Conventional predictive models, in their simplest form, execute individual predictions through parameters computed from the data. Once computed, those parameters are fixed. Individual predictions arise from evaluating a function with those fixed parameters at the individual's covariates:
+
+$$\hat{y}_i \;=\; f(x_i;\; \hat{\theta}),$$
+
+with $\hat{\theta}$ identical for all individuals.
+
+More elaborate predictive models do allow parameters to vary across individuals: hierarchical models with covariate-dependent random effects, varying-coefficient models, hypernetworks conditioned on global context, mixture-of-experts with gating networks, and state-space models with shared dynamics all admit individual variation in different forms. Some of these can be made to behave, under specific configurations, in ways functionally similar to what we describe below. **The framework's contribution is therefore not the absence of antecedents but the explicit and canonical formulation** of a specific structural pattern that those antecedents do not typically make explicit.
+
+What the driver does, framed precisely, is captured by the following compact statement.
+
+> **Distinguishing structure (short form).** Conventional predictive models do not typically make explicit a structure of the form
+> $$\theta_i = \theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}})$$
+> in which the population reference $\theta_{\text{ref}}$ enters the deviation function $\Delta$ as a structural argument, not merely as a centering constant.
+
+> **Distinguishing structure (extended form).** Conventional predictive models, including those that admit individual heterogeneity or covariate-dependent parameters, do not typically formulate individual parameters as explicit deviations from a population reference where the deviation function depends both on the individual's observable characteristics and on the reference itself. To the best of our knowledge, no standard formulation makes this functional dependence explicit and canonical.
+
+The substantive content of this distinguishing structure unpacks into three points:
+
+- The population reference $\theta_{\text{ref}}$ is always present as an explicit anchor in the predictive equation.
+- The deviation $\Delta_i$ is computed as a function of observable signals from the individual.
+- The individual prediction emerges from $\theta_i = \theta_{\text{ref}} + \Delta_i$, not from $\theta_i$ estimated independently per individual nor from $\theta_{\text{ref}}$ shifted by a structurally separate term.
+
+Crucially, the deviation is itself a function of the population reference: $\Delta_i = \Delta(x_i, \theta_{\text{ref}})$. If the population reference changes ---e.g., the framework is transferred to a new population--- the deviation function may behave differently because $\theta_{\text{ref}}$ is one of its arguments. This **structural dependence of $\Delta$ on $\theta_{\text{ref}}$** is the precise mathematical content of the framework's contribution and the property that the AMM canonical form (Vignette 01) makes operational.
+
+---
+
+# **2. General Mathematical Formulation**
+
+## **2.1. Fundamental Equation**
+
+For each observation $i$ with observable covariates $x_i$, the framework defines:
+
+$$\theta_i \;=\; \theta_{\text{ref}} \;+\; \Delta(x_i,\; \theta_{\text{ref}}),$$
+
+where:
+
+- $\theta_{\text{ref}} = \mathbb{E}[\theta]$ represents the population parameters (the "average driver" or, in general, the reference entity in the system under study).
+- $\Delta(\cdot, \cdot)$ is a **deviation function** quantifying how much and in which direction individual $i$ departs from the reference, based on observable characteristics $x_i$ and on the reference itself.
+
+## **2.2. Individual Prediction**
+
+The prediction for individual $i$ is
+
+$$\hat{y}_i \;=\; f\!\bigl(x_i;\; \theta_i\bigr) \;=\; f\!\bigl(x_i;\; \theta_{\text{ref}} + \Delta(x_i,\; \theta_{\text{ref}})\bigr).$$
+
+## **2.3. Components of the Framework**
+
+The framework is fully specified by three design choices:
+
+1. **How $\theta_{\text{ref}}$ is estimated**: from the full sample, from a reference subset, or as a hyperparameter with its own distribution.
+2. **How $\Delta$ is estimated**: as a parametric linear function, as a non-parametric function, or as the output of a neural network.
+3. **What distribution is assumed for $Y_i \mid \theta_i$**: this determines the family of problems the framework can address.
+
+The canonical functional form for $\Delta$ is the **Additive-Multiplicative-Modulated (AMM) form** developed in Vignette 01.
+
+---
+
+# **3. Path 1: Hierarchical Bayesian Model with Covariate-Dependent Random Effects**
+
+## **3.1. General Description**
+
+This path is the most faithful to the original cognitive analogy and the most rigorous from a theoretical standpoint. It captures the three levels of the process: the population reference (top level), the individual deviation (intermediate level), and the noisy observation (bottom level).
+
+## **3.2. Hierarchical Specification**
+
+### **3.2.1. Population Level**
+
+$$\theta_{\text{ref}} \;\sim\; p(\theta \mid \text{hyperparameters}).$$
+
+This level establishes the prior over the population parameters. Hyperparameters may themselves carry hyperpriors, completing the hierarchy.
+
+### **3.2.2. Individual Level**
+
+$$\theta_i \mid x_i \;\sim\; \mathcal{N}\!\bigl(\theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}}),\; \Sigma_i\bigr),$$
+
+where $\Sigma_i$ is the covariance of individual parameters, possibly depending on $x_i$ to allow **individual heteroscedasticity**: individuals with certain characteristics may have more or less variable deviations from the reference.
+
+### **3.2.3. Observation Level**
+
+$$Y_i \mid \theta_i \;\sim\; \mathcal{D}(\theta_i),$$
+
+with $\mathcal{D}$ the distribution appropriate to the modelling problem (Normal, Poisson, Binomial, Gamma, etc.).
+
+## **3.3. Extension for Zero Inflation**
+
+### **3.3.1. Structural vs. Sampling Zeros**
+
+When the phenomenon admits an excessive proportion of zeros, the zeros may be of two natures:
+
+- **Structural zeros**: the data-generating process cannot produce a non-zero value for the unit (e.g., a driver who will never change lanes because the vehicle is parked).
+- **Sampling zeros**: the data-generating process could produce a positive value, but did not in this realization (e.g., an active driver who simply did not change lanes during the observation interval).
+
+### **3.3.2. Mixture Model with Individual Deviation**
+
+The probability of observing a zero is
+
+$$P(Y_i = 0 \mid x_i) \;=\; \pi_i + (1 - \pi_i) \cdot P_{\text{count}}(0 \mid \theta_i),$$
+
+with $\pi_i$ the probability of structural zero for individual $i$.
+
+Crucially, in this framework **both** $\pi_i$ **and** $\theta_i$ are defined as deviations from their respective population references:
+
+$$\mathrm{logit}(\pi_i) \;=\; \mathrm{logit}(\pi_{\text{ref}}) + \Delta_\pi(x_i,\; \pi_{\text{ref}}),$$
+
+$$\theta_i \;=\; \theta_{\text{ref}} + \Delta_\theta(x_i,\; \theta_{\text{ref}}).$$
+
+The dual deviation structure ---both components of the inflated model anchored to the population reference--- is the framework's distinctive contribution to zero-inflated count modelling.
+
+## **3.4. Extension for Dependence Among Observations**
+
+When observations are not independent, the correlation structure is introduced at the individual level:
+
+- **Temporal dependence**: individual parameters follow autoregressive processes,
+$$\theta_{i, t} \;=\; \theta_{\text{ref}} + \Delta(x_{i, t}, \theta_{\text{ref}}) + \phi\bigl(\theta_{i, t - 1} - \theta_{\text{ref}}\bigr),$$
+with $\phi$ controlling the temporal persistence of the deviation.
+- **Spatial dependence**: deviations correlate according to spatial covariance functions, $\mathrm{Cov}(\Delta_i, \Delta_j) = \sigma^2 \cdot r(d_{ij})$, with $d_{ij}$ the distance between units.
+- **Cross-variable dependence**: full covariance matrices in the multivariate response case connect deviations across response variables.
+
+## **3.5. Multivariate Extension**
+
+When multiple response variables $Y_i = (Y_{i1}, \ldots, Y_{iK})$ are present, the parameter vector becomes a vector of vectors:
+
+$$\boldsymbol{\theta}_i \;=\; \boldsymbol{\theta}_{\text{ref}} + \boldsymbol{\Delta}(x_i,\; \boldsymbol{\theta}_{\text{ref}}).$$
+
+The joint distribution $\mathcal{D}$ is modelled in two ways:
+
+- **Directly**: through a multivariate distribution (multivariate Normal, multinomial, etc.).
+- **Through copulas**: marginal distributions $Y_{ik} \mid \theta_{ik}$ are specified individually and connected by a copula whose dependence structure may itself depend on $x_i$.
+
+## **3.6. Recommended Implementation**
+
+Stan is the most flexible tool for this structure, accessed through the `cmdstanr` interface. PyMC and INLA are alternatives ---PyMC for Python integration, INLA for fast approximations sacrificing some flexibility.
+
+> **Implementation status (`gdpar 0.0.0.9001`).** Path 1 is the operational default and the only currently implemented path in `gdpar`. Paths 2 (varying-coefficient) and 3 (hypernetwork) are described conceptually in §4 and §5 below, with implementation queued for future versions; calls of the form `gdpar(..., path = "vcm")` or `gdpar(..., path = "hyper")` abort with a `gdpar_unsupported_feature_error`. See vignettes `v05_asymptotics_path2_vcm` and `v06_asymptotics_path3_hypernetwork` for the reference-grade asymptotic theory and prospective implementation notes.
+
+---
+
+# **4. Path 2: Varying-Coefficient Models**
+
+## **4.1. General Description**
+
+This is the most direct frequentist version of the framework. The central idea is that the model coefficients are not constant but functions of the individual's characteristics.
+
+## **4.2. Formulation**
+
+$$Y_i \;=\; x_i^\top\, \beta(z_i) + \varepsilon_i,$$
+
+where:
+
+- $x_i$ are the standard predictor covariates.
+- $z_i$ are variables describing the individual ---in the driving analogy, "what you observe about the driver": aggressiveness, vehicle type, spacing, etc.
+- $\beta(z_i)$ is a vector of coefficients varying as a function of $z_i$, producing distinct coefficients for each individual.
+- $\varepsilon_i$ is the error term.
+
+## **4.3. Relation to the Population Reference**
+
+The population reference emerges naturally:
+
+$$\beta_{\text{ref}} \;=\; \beta(\bar{z}),$$
+
+i.e., the coefficients evaluated at the average individual ($\bar{z}$ being the vector of means or modes of individual descriptors). The individual deviation is then
+
+$$\Delta_i \;=\; \beta(z_i) - \beta(\bar{z}).$$
+
+## **4.4. Estimation of $\beta(\cdot)$**
+
+The function $\beta(\cdot)$ can be estimated in several ways:
+
+- **Splines**: produce smooth functions, appropriate when the relation between $z_i$ and the coefficients is continuous and relatively smooth. Permits inference on functional form.
+- **Kernels**: assume no parametric form. More flexible but less efficient in small samples.
+- **Random forests**: allow complex interactions among components of $z_i$ without prior specification. Sacrifice analytical interpretability for expressive capacity.
+
+## **4.5. Strengths**
+
+Interpretability is the principal strength: one can visualize and quantify explicitly how each individual trait ($z_i$) modifies each model coefficient ($\beta_k$) relative to the average. This addresses questions such as "by how much does the effect of variable $x_k$ on $Y$ change when the individual is more aggressive than the average?"
+
+## **4.6. Limitations**
+
+Scaling to high-dimensional problems (many components in $z_i$ or many coefficients in $\beta$) is harder than for the Bayesian path, since non-parametric estimation of multivariate functions suffers from the curse of dimensionality.
+
+## **4.7. Extension for Zero Inflation**
+
+The structure is wrapped in a two-part model:
+
+- **Hurdle model**: one part models $P(Y_i > 0 \mid z_i)$ and the other models $Y_i \mid Y_i > 0, z_i$, both with varying coefficients.
+- **Zero-inflated model**: analogous to the Path 1 mixture, but with $\pi_i$ and $\theta_i$ estimated by varying coefficients rather than hierarchically.
+
+## **4.8. Extension for Dependence**
+
+Generalized estimating equations (GEE) handle correlation among observations without requiring full specification of the joint distribution; alternatively, the model is extended with explicit correlation structure in the residuals.
+
+---
+
+# **5. Path 3: Conditional Parameter Networks (Hypernetworks / Amortized Inference)**
+
+## **5.1. General Description**
+
+This path has the highest expressive capacity. The central idea: a neural network $h_\phi$ takes the individual's characteristics and **generates** the parameters of the predictive model for that specific individual.
+
+## **5.2. Formulation**
+
+$$\theta_i \;=\; h_\phi(x_i, \theta_{\text{ref}}),$$
+
+$$Y_i \;\sim\; \mathcal{D}(\theta_i),$$
+
+where:
+
+- $h_\phi$ is a neural network with parameters $\phi$ (the *hypernetwork* parameters).
+- $x_i$ are the observable characteristics of the individual.
+- $\theta_{\text{ref}}$ enters as an explicit input, preserving the anchoring to the population reference.
+- $\theta_i$ is the parameter vector of the predictive model for individual $i$.
+
+## **5.3. Mechanism of Anchoring to the Population Reference**
+
+The link to the population reference is established in two complementary ways:
+
+1. **As explicit input**: $\theta_{\text{ref}}$ is a feature input to the network, so the network learns to produce deviations conditioned on the reference. If the population reference changes, the network produces different deviations.
+2. **As regularization**: a penalty term $\lambda \|\theta_i - \theta_{\text{ref}}\|^2$ is added to the loss, so deviations are not arbitrarily large. This forces the network to produce individual parameters that "resemble" the average unless the observable evidence justifies deviation.
+
+## **5.4. Learning Process**
+
+During training, the network learns to map from "what is observable about the individual" to "what its parameters should be." The typical loss is
+
+$$\mathcal{L}(\phi) \;=\; -\sum_{i=1}^n \log p(Y_i \mid \theta_i) + \lambda \sum_{i=1}^n \|\theta_i - \theta_{\text{ref}}\|^2,$$
+
+where the first term maximizes the likelihood under the individual parameters, and the second penalizes excessive deviations from the reference.
+
+## **5.5. Extension for Zero Inflation**
+
+The network produces both $\pi_i$ (structural zero probability) and the count parameters $\theta_i$ as separate outputs:
+
+$$(\pi_i, \theta_i) \;=\; h_\phi(x_i, \pi_{\text{ref}}, \theta_{\text{ref}}).$$
+
+## **5.6. Extension for Dependence**
+
+The hypernetwork is combined with architectures designed for sequential or structured data:
+
+- **Temporal dependence**: recurrent architectures (LSTM, GRU) or attention mechanisms over observation sequences.
+- **Spatial dependence**: graph neural networks (GNN) over the spatial structure.
+- **General dependence**: transformer-style attention.
+
+## **5.7. Multivariate Extension**
+
+The network produces the parameters of the joint distribution:
+
+- **Directly**: $h_\phi$ produces the parameters of a multivariate distribution (e.g., means and covariance matrix of a multivariate Normal).
+- **Through copulas**: $h_\phi$ produces the marginal parameters and the copula parameters connecting them.
+- **Through normalizing flows**: complex conditional distributions are modelled without restriction to parametric families.
+
+## **5.8. Strengths**
+
+The deviation function $\Delta$ can be arbitrarily nonlinear. There is no restriction on the functional form of the relation between individual characteristics and parameters. This permits capture of complex interactions that the other two paths cannot represent without manual specification.
+
+## **5.9. Limitations**
+
+Interpretability is reduced: it is not possible to state analytically "this individual is more aggressive than the average by *this specific amount* and that modifies *this coefficient* by *this magnitude*." The network produces parameters but does not explain why.
+
+## **5.10. Recommended Implementation**
+
+`torch` (the R port of LibTorch) is the natural choice. For complex conditional distributions, normalizing flows extend the architecture.
+
+---
+
+# **6. Comparative Table of the Three Paths**
+
+> **Implementation status (`gdpar 0.0.0.9001`).** Only the **Hierarchical Bayesian** column below is operationally available in the current release. The **Varying-Coefficient** and **Hypernetwork** columns describe the framework's planned coverage; their implementation in `gdpar` is queued for future versions (`gdpar(..., path = "vcm")` and `gdpar(..., path = "hyper")` abort with `gdpar_unsupported_feature_error`).
+
+```{r comparative-table}
+comparative <- data.frame(
+  Criterion = c(
+    "Fidelity to cognitive analogy",
+    "Theoretical rigor",
+    "Interpretability",
+    "Expressive capacity of Delta",
+    "Scalability to high dimension",
+    "Uncertainty quantification",
+    "Implementation effort",
+    "Primary tools"
+  ),
+  Hierarchical_Bayesian = c(
+    "High",
+    "Very high",
+    "High",
+    "Moderate (parametric)",
+    "Moderate",
+    "Native (full posteriors)",
+    "Moderate",
+    "Stan, cmdstanr"
+  ),
+  Varying_Coefficient = c(
+    "Moderate",
+    "High",
+    "Very high",
+    "Moderate to high",
+    "Low (curse of dim.)",
+    "Asymptotic (CIs)",
+    "High",
+    "mgcv, splines"
+  ),
+  Hypernetwork = c(
+    "Moderate",
+    "Moderate",
+    "Low",
+    "Arbitrarily high",
+    "High",
+    "Requires extensions (MC dropout, etc.)",
+    "Low",
+    "torch"
+  ),
+  check.names = FALSE
+)
+knitr::kable(comparative, caption = "Comparison of the three estimation paths.")
+```
+
+---
+
+# **7. Selection Guide by Scenario**
+
+```{r scenario-table}
+scenarios <- data.frame(
+  Scenario = c(
+    "Few variables, interpretability central",
+    "Complex structure, full uncertainty",
+    "High dimension, nonlinear relations",
+    "Inflated zeros (any kind)",
+    "Dependent observations",
+    "Multivariate response"
+  ),
+  Recommended_Path = c(
+    "Varying-coefficient (Path 2)",
+    "Hierarchical Bayesian (Path 1)",
+    "Hypernetwork (Path 3)",
+    "Any of the three, with mixture model",
+    "Bayesian (more natural) or VCM with GEE",
+    "Bayesian with copulas, or multi-output hypernetwork"
+  ),
+  check.names = FALSE
+)
+knitr::kable(scenarios, caption = "Recommended estimation path by problem scenario.")
+```
+
+---
+
+# **8. Formal Summary**
+
+## **8.1. Central Principle**
+
+> Every predictive model can benefit from a structure in which individual parameters are defined as explicit deviations from a population reference, where the deviation function depends both on the individual's observable characteristics and on the reference itself.
+
+## **8.2. Canonical Equation**
+
+$$\boxed{\theta_i \;=\; \theta_{\text{ref}} + \Delta(x_i,\; \theta_{\text{ref}})}$$
+
+The canonical functional form for $\Delta$ is the **Additive-Multiplicative-Modulated (AMM)** form,
+
+$$\Delta(x, \theta_{\text{ref}}) \;=\; a(x) + b(x) \odot \theta_{\text{ref}} + W(\theta_{\text{ref}})\, x,$$
+
+developed in Vignette 01.
+
+## **8.3. Desirable Properties**
+
+1. **Anchoring**: when there is no information about the individual ($x_i$ unobserved or non-informative), $\Delta \to 0$ and $\theta_i \to \theta_{\text{ref}}$. The model collapses to the population baseline.
+2. **Individuation**: when there is rich information about the individual, $\Delta$ can be large and parameters move away from the reference as far as the evidence justifies.
+3. **Transferability**: when $\theta_{\text{ref}}$ changes (new population), deviations are recomputed coherently because $\Delta$ is a function of $\theta_{\text{ref}}$.
+4. **Generality**: the framework subsumes fixed-effects ($\Delta \equiv 0$), standard random effects ($\Delta$ independent of $\theta_{\text{ref}}$), and random coefficients ($\Delta$ linear in $x_i$) as special cases.
+
+## **8.4. Universality across Data Conditions**
+
+The framework operates without restriction on:
+
+- Independence or dependence among observations (extended via correlation structures).
+- Univariate or multivariate response (extended via joint distributions or copulas).
+- Presence or absence of zero inflation (extended via mixture models with dual deviation).
+- Nature of the zeros: structural or sampling (distinguished via the $\pi_i$ component).
+
+Each condition may require a specific extension of the model, but all operate under the same canonical principle $\theta_i = \theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}})$.
+
+---
+
+# **Appendix: Notation**
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $\theta_i$ | Vector of model parameters for individual $i$ |
+| $\theta_{\text{ref}}$ | Population reference parameters (expectation) |
+| $\Delta(x_i, \theta_{\text{ref}})$ | Individual deviation function |
+| $x_i$ | Observable covariates of individual $i$ |
+| $z_i$ | Individual descriptors (Path 2) |
+| $W(\theta_{\text{ref}})$ | Modulating matrix dependent on the reference |
+| $\Sigma_i$ | Individual covariance matrix (Path 1) |
+| $\pi_i$ | Structural zero probability for individual $i$ |
+| $\pi_{\text{ref}}$ | Population structural zero probability |
+| $h_\phi$ | Hypernetwork with parameters $\phi$ (Path 3) |
+| $\mathcal{D}(\theta_i)$ | Distribution of the response given $\theta_i$ |
+| $\beta(z_i)$ | Varying coefficients as a function of $z_i$ (Path 2) |
+| $\phi$ | Temporal persistence parameter of the deviation |
+| $\lambda$ | Regularization parameter for deviation penalty (Path 3) |
+| $\odot$ | Hadamard (elementwise) product |

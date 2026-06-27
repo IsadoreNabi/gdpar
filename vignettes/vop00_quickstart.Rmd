@@ -1,0 +1,213 @@
+---
+title: "**Quickstart: A First Fit in Five Minutes**"
+subtitle: "Installation, a synthetic Gaussian fit, and how to read the output"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Quickstart: A First Fit in Five Minutes}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  collapse = TRUE, comment = "#>",
+  eval = FALSE
+)
+```
+
+---
+
+# **1. Who this vignette is for**
+
+This is the first vignette to read if you have **never used `gdpar` before**. It assumes only that you have a working R installation (`R >= 4.2.0`); it does **not** assume familiarity with Stan, Bayesian inference, or the AMM canonical form. The goal is a single end-to-end fit on a synthetic dataset, with one paragraph per command explaining what is happening and what to look at in the output.
+
+After this quickstart you can move on, in order of operational depth, to:
+
+- `vop01_parametrization_toggle` --- how the parametrization auto-decision works and how to override it.
+- `vop02_arbitrary_p` --- fits with covariate dimension $p > 1$.
+- `vop03_grouped_anchors` --- fits with grouped references via the `group` argument.
+- `vop04_amm_intermediate` --- B-spline `W` bases, custom families, heterogeneous slots.
+- `vop05_distributional_K_dharma` --- distributional fits with $K > 1$ slot families and DHARMa residual diagnostics.
+
+For the theoretical background, the entry point is `v00_framework_overview`; for identifiability conditions, `v01_amm_identifiability`; for the operational meaning of the population reference, `v02_gnoseological_validity`.
+
+---
+
+# **2. Installation**
+
+The package depends on `cmdstanr` for the Stan back-end. Install once per machine:
+
+```{r install-cmdstanr, eval = FALSE, purl = FALSE}
+install.packages(
+  "cmdstanr",
+  repos = c("https://stan-dev.r-universe.dev", getOption("repos"))
+)
+cmdstanr::install_cmdstan()
+```
+
+`install_cmdstan()` downloads and compiles the C++ Stan toolchain in the user's home directory. The first run takes a few minutes; subsequent runs reuse the cached install.
+
+Then install `gdpar` itself (development version):
+
+```{r install-gdpar, eval = FALSE, purl = FALSE}
+# install.packages("remotes")
+remotes::install_github("IsadoreNabi/gdpar")
+```
+
+Load the package:
+
+```{r load}
+library(gdpar)
+```
+
+---
+
+# **3. A synthetic dataset**
+
+The quickstart uses a deliberately simple dataset: one outcome $y$, one covariate $x$, no grouping, no multivariate covariate path, and a Gaussian likelihood. The data-generating process is
+
+$$y_i = \theta_{\text{ref}} + a\,x_i + \varepsilon_i, \qquad \varepsilon_i \sim \mathcal{N}(0, \sigma^2).$$
+
+Here $\theta_{\text{ref}} = 1.5$ is the population reference, $a = 0.8$ is the additive slope on $x$, and $\sigma = 0.3$ is the residual noise scale. We simulate $n = 200$ observations:
+
+```{r data}
+set.seed(20260526)
+n <- 200L
+x <- rnorm(n)
+theta_ref_true <- 1.5
+a_true <- 0.8
+sigma_true <- 0.3
+y <- theta_ref_true + a_true * x + rnorm(n, sd = sigma_true)
+dat <- data.frame(y = y, x = x)
+head(dat)
+```
+
+The data frame `dat` has two columns: the outcome `y` and the covariate `x`. No further preparation is needed; `gdpar()` will centre and scale `x` internally for the AMM design matrices.
+
+---
+
+# **4. A first fit**
+
+The call is one line:
+
+```{r fit}
+fit <- gdpar(
+  formula = y ~ x,
+  data    = dat,
+  family  = gdpar_family("gaussian"),
+  path    = "bayes"
+)
+```
+
+A few things happen here that are worth knowing before reading the output.
+
+- `formula = y ~ x` follows the standard R modelling formula. The left-hand side is the outcome; the right-hand side lists the covariate(s) that enter the AMM deviation $a(x) + b(x)\,\theta_{\text{ref}} + W(\theta_{\text{ref}})\,x$.
+- `family = gdpar_family("gaussian")` selects the Gaussian likelihood with identity link. Other primary families (Poisson, NB, Bernoulli) accept the same constructor.
+- `path = "bayes"` selects Path 1 (hierarchical Bayesian via Stan), which is the only currently implemented path in `gdpar 0.0.0.9001`. Calls with `path = "vcm"` or `path = "hyper"` will abort with `gdpar_unsupported_feature_error`.
+- The function runs a pre-flight diagnostic (a short NCP fit) to choose CP vs NCP parametrization per component; see `vop01` for the details. Then it samples the long fit. With $n = 200$, default chains and warmup, the wall-time is on the order of a minute on a current laptop.
+
+The return object `fit` has class `gdpar_fit` and carries the Stan draws, the AMM design matrices, the parametrization decision, and the post-fit identifiability and validity diagnostics.
+
+---
+
+# **5. Reading the print**
+
+The `print` method shows a compact one-screen summary:
+
+```{r print}
+print(fit)
+```
+
+The default print covers, in order:
+
+- **Call** and **path / family / link** declared by the user.
+- **Sample size** $n$, covariate dimension $p$, and slot count $K$ (here $p = 1$, $K = 1$).
+- **Parametrization decision** per component (`a` and `W`) reported by the pre-flight, plus the filter that fired (see `vop01` §3).
+- **Sampling diagnostics**: number of divergences, maximum tree-depth saturations, E-BFMI per chain. The line **passes** when there are zero divergences and E-BFMI is above the default threshold.
+- **Identifiability verdict**: the joint diagnostic of (C1)-(C7) declared by `gdpar_check_identifiability()` on the fit (see `v01` for the conditions).
+
+A clean output ends with a line of the form `Identifiability: OK | Sampling: OK`. If either fails, the print directs the user to the corresponding diagnostic helper.
+
+---
+
+# **6. Coefficients**
+
+The `coef` method returns the posterior summaries:
+
+```{r coef}
+coefs <- coef(fit)
+coefs
+```
+
+For a $K = 1$ fit, `coef(fit)` returns a single object of class `gdpar_coef` with named slots for `theta_ref`, `a_coef`, `b_coef`, `W_coef`, `sigma_y` (when applicable), plus the hyperparameter slots (`mu_theta_ref`, `sigma_theta_ref`, `sigma_a`, `sigma_b`, `sigma_W`). Each slot is a data frame with one row per parameter and columns `mean`, `sd`, `q5`, `q50`, `q95`. The recovered `theta_ref` should sit close to the true value $1.5$ within the posterior credible band; the recovered `a_coef` close to $0.8$; the recovered `sigma_y` close to $0.3$.
+
+For $K > 1$, `coef(fit)` returns a named list of `gdpar_coef` objects, one per slot; see `vop05` for the multi-slot case.
+
+---
+
+# **7. Predictions**
+
+The `predict` method generates posterior predictions, optionally on new data:
+
+```{r predict}
+new_x <- data.frame(x = seq(-2, 2, length.out = 11))
+preds <- predict(fit, newdata = new_x, level = 0.9)
+preds
+```
+
+The output is a data frame with one row per `newdata` row and columns `mean`, `lower`, `upper` (and per-slot columns when $K > 1$). The `level` argument controls the credible-band width. If `newdata` is omitted, `predict` returns posterior predictions on the training data.
+
+---
+
+# **8. Diagnostics**
+
+The `diagnostics()` helper aggregates the post-fit diagnostic battery in one call:
+
+```{r diagnostics}
+diag <- diagnostics(fit)
+print(diag)
+```
+
+The output reports, in order, the sampling diagnostics (already in `print(fit)`), the identifiability diagnostics, the gnoseological validity diagnostics ((HOM) / (REG) / (CLOS) tests; see `v02`), and the contraction diagnostic ($\theta_{\text{ref}}$ posterior contraction relative to its prior; see `v04` and `R/contraction_diagnostic.R`). Each block ends with a one-line verdict (OK / WARN / FAIL) and a pointer to the relevant vignette when the verdict is not OK.
+
+For Path 1 Gaussian fits like this quickstart, the expected output is OK on all four blocks. For low-information fits, weak priors, or violations of structural conditions, the corresponding block flags WARN or FAIL and the user follows the vignette pointer for the remediation recipe.
+
+---
+
+# **9. What to read next**
+
+If the quickstart ran end-to-end and the output looks plausible, the next operational steps depend on what you want to do:
+
+- **Multiple covariates** ($p > 1$): `vop02_arbitrary_p`. The formula interface extends naturally; the per-component parametrization decision is made by the multivariate pre-flight (filters 1-3, see `vop01` §3 for the scalar / multivariate cross-reference).
+- **Grouped reference** (one $\theta_{\text{ref}}$ per group): `vop03_grouped_anchors`. The `group` argument of `gdpar()` enables this regime; see `v01` §6.6.2 and the (C7) condition for the identifiability story.
+- **B-spline modulation** $W$: `vop04_amm_intermediate` §2.
+- **Heterogeneous families per slot** ($K > 1$ with mixed families): `vop04_amm_intermediate` §3 + `vop05_distributional_K_dharma`.
+- **Custom family**: `vop05_distributional_K_dharma` §2.4 (`lognormal_loc_scale` recipe) and §6 (general `gdpar_family_custom` registry).
+- **CATE/ITE estimation**: `v08_cate_ite_positioning` (theory) + `v08b_cate_ite_bridge_implementation` (T-learner bridge) + `vop06_meta_learner_comparison` (operational + external meta-learner comparison via `gdpar_compare_meta_learners`).
+- **Empirical Bayes for $\theta_{\text{ref}}$**: `v07_eb_vs_fb` (theory) + `v07b_eb_multivariate` (multivariate extension) + `vop07_eb_workflow` (operational, `gdpar_eb` + `gdpar_compare_eb_fb`).
+- **Asymptotic theory**: `v04_asymptotics_path1_bayesian` for Path 1.
+
+If the quickstart failed at any step ---installation, fit, or diagnostics--- the relevant vignette pointer above is the canonical reference for remediation; this quickstart deliberately does not cover error recovery, custom families, or advanced diagnostics.
+
+---
+
+# **10. Summary**
+
+A first `gdpar` fit needs three ingredients: data (a data frame), a formula, and a family. Everything else has defaults that are operational out of the box for the AMM Gaussian case. The print, `coef`, `predict`, and `diagnostics` methods cover the day-to-day reading of the fit; the eight operational vignettes (vop00-vop07) plus the theoretical vignettes (v00-v09 series) provide the depth for any specific use case.

@@ -1,0 +1,371 @@
+---
+title: "**Theoretical Addendum -- Block 8:**"
+subtitle: "Positioning AMM relative to the CATE / ITE Literature"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{Positioning AMM relative to the CATE / ITE Literature}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+---
+
+# **1. Purpose**
+
+The framework introduced in Block 1 individualizes parameters via $\theta_i = \theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}})$. A separate but related literature ---**heterogeneous treatment effect estimation**--- also individualizes a particular quantity, the **conditional average treatment effect (CATE)** or the **individual treatment effect (ITE)**, and has produced a large body of estimators (S/T/X-learners, R-learners, causal forests, BART for causal inference, doubly-robust meta-estimators, double/debiased machine learning).
+
+A reader familiar with that literature may reasonably ask: **what is the relationship between AMM and CATE/ITE estimators? Is the framework just a reformulation of CATE estimation?**
+
+This block addresses that question directly. The answer is structured in three layers:
+
+- **(L1) Conceptual map.** AMM and CATE/ITE individualize **structurally distinct** objects: AMM individualizes a **predictive parameter** $\theta_i$ controlling the conditional law of $Y_i \mid X_i$; CATE/ITE individualize a **counterfactual difference** $\tau(x) = \mathbb{E}[Y(1) - Y(0) \mid X = x]$ defined on potential outcomes. The two coincide **only under specific causal identification assumptions** (ignorability, overlap, consistency).
+
+- **(L2) Technical bridge.** Under explicit causal-identification assumptions added to the AMM hypotheses, the AMM-fitted $\Delta$ component identifies the CATE function. Without those assumptions, $\Delta$ is a predictive deviation without counterfactual interpretation.
+
+- **(L3) Methodological positioning.** AMM is a **functional-predictive framework** that admits a CATE interpretation under the bridge of (L2) but does not require it. The framework's stance aligns with Dawid's (2000) decision-theoretic program: **individualization without committed counterfactual ontology**, with counterfactual interpretation available as an explicit add-on rather than as a built-in assumption.
+
+The framework's **core position** can be stated compactly:
+
+> AMM does not estimate causal effects by default. It estimates individualized predictive parameters. Counterfactual interpretation requires the user to invoke explicit causal-identification hypotheses (ignorability, overlap, consistency) on top of the AMM hypotheses; under those, AMM coincides with a particular CATE estimator and can be compared with the meta-learner literature on its terms.
+
+This positioning is **not a claim that AMM subsumes the CATE literature**; it is the modest claim that **AMM and CATE are distinct objects with a precise bridge between them**, and that comparison with specific CATE estimators (meta-learners, causal forests, BART) is best made by mapping each to the relevant Path of the AMM framework under the bridge conditions of Theorem 8B.
+
+The block also addresses the philosophical layer (Holland 1986; Pearl 2009; Imbens-Rubin 2015; Dawid 2000) by stating where AMM stands in the long-running debate about whether individual causal effects are **identifiable** at all (the "fundamental problem of causal inference"; Holland 1986).
+
+---
+
+# **2. Setting and Notation**
+
+## **2.1. AMM and CATE/ITE: Formal Specifications**
+
+**The AMM object.** As in Block 1: $\theta_i \in \mathbb{R}^p$ controls the conditional law $Y_i \mid X_i \sim \mathcal{D}(\theta_i)$, with $\theta_i = \theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}})$. The deviation $\Delta(x_i, \theta_{\text{ref}}) \in \mathbb{R}^p$ is a **predictive object**: it tells the framework how the individual's parameters differ from the population reference, and translates into a prediction for $Y_i$ via the response distribution $\mathcal{D}$.
+
+**The CATE/ITE object.** Under the Rubin causal model (Imbens-Rubin 2015), each individual has potential outcomes $(Y_i(0), Y_i(1))$ corresponding to the response under control and treatment, only one of which is observed. The **individual treatment effect (ITE)** is
+$$\tau_i \;=\; Y_i(1) - Y_i(0).$$
+The **conditional average treatment effect (CATE)** at $x$ is
+$$\tau(x) \;=\; \mathbb{E}[Y(1) - Y(0) \mid X = x].$$
+
+Both are **counterfactual objects**: they are defined on the joint distribution of $(Y(0), Y(1))$, only one component of which is observable per individual. By the Fundamental Problem of Causal Inference (Holland 1986), $\tau_i$ is **never directly observable**, and identification of $\tau(x)$ from observable data requires additional assumptions.
+
+**Operational identification of CATE.** Under (Imbens-Rubin 2015):
+- **(IGN) Ignorability / unconfoundedness:** $(Y(0), Y(1)) \perp T \mid X$.
+- **(OVL) Overlap:** $0 < \Pr(T = 1 \mid X = x) < 1$ for $\mu$-a.e. $x$.
+- **(CONS) Consistency / SUTVA:** $Y_i = T_i Y_i(1) + (1 - T_i) Y_i(0)$.
+
+Under (IGN)+(OVL)+(CONS), the conditional means $\mu_t(x) = \mathbb{E}[Y(t) \mid X = x]$ are identified from observable data:
+$$\mu_t(x) \;=\; \mathbb{E}[Y \mid X = x, T = t],$$
+and $\tau(x) = \mu_1(x) - \mu_0(x)$.
+
+## **2.2. The Object-Level Distinction**
+
+The structural distinction between AMM and CATE is summarized in this contrast:
+
+| Object | Definition | What it predicts | Identification assumption |
+|:-------|:-----------|:-----------------|:--------------------------|
+| AMM $\theta_i$ | Parameter of $Y_i \mid X_i$ | Distribution of $Y_i$ given $X_i$ | (D-ID), (LIN), (FIC) of Block 1 |
+| AMM $\Delta_i = \Delta(x_i, \theta_{\text{ref}})$ | Deviation from population reference | How $\theta_i$ differs from $\theta_{\text{ref}}$ | Inherits AMM hypotheses |
+| CATE $\tau(x)$ | $\mathbb{E}[Y(1) - Y(0) \mid X = x]$ | Counterfactual difference | (IGN), (OVL), (CONS) |
+| ITE $\tau_i$ | $Y_i(1) - Y_i(0)$ | Counterfactual difference for individual $i$ | (IGN), (OVL), (CONS); not directly observable |
+
+**Key observation: AMM and CATE individualize different types of objects.** AMM individualizes a parameter that controls predictive distributions; CATE individualizes a counterfactual difference. They become comparable only when the AMM parameter $\theta_i$ is *interpreted* as a representation of the potential-outcome means $(\mu_0(x_i), \mu_1(x_i))$ ---i.e., when the bridge of §5 is invoked.
+
+## **2.3. Notation Summary**
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $T_i \in \{0, 1\}$ | Treatment indicator |
+| $(Y_i(0), Y_i(1))$ | Potential outcomes |
+| $Y_i = T_i Y_i(1) + (1 - T_i) Y_i(0)$ | Observed outcome under (CONS) |
+| $\tau_i = Y_i(1) - Y_i(0)$ | ITE |
+| $\tau(x) = \mathbb{E}[Y(1) - Y(0) \mid X = x]$ | CATE |
+| $\mu_t(x) = \mathbb{E}[Y(t) \mid X = x]$ | Conditional potential outcome mean |
+| $e(x) = \Pr(T = 1 \mid X = x)$ | Propensity score |
+| $\theta_i, \Delta_i, \theta_{\text{ref}}$ | AMM parameter and deviation, as in Block 1 |
+
+---
+
+# **3. Three Layers of Positioning**
+
+Parallel to Blocks 1-7:
+
+- **(L1) Conceptual map**: structural distinction between AMM and CATE/ITE objects (§4-§5).
+- **(L2) Technical bridge**: when AMM identifiability transfers to CATE identification under explicit causal-identification assumptions (§5-§6).
+- **(L3) Methodological positioning**: when to use AMM (functional-predictive) vs. CATE estimators (counterfactual), and how each special case of CATE meta-learner maps to a Path of the framework (§6-§8).
+
+---
+
+# **4. Proposition 8A: The Conceptual Map**
+
+> **Proposition 8A. Object-level distinction.** AMM and CATE/ITE individualize distinct objects:
+>
+> - **AMM individualizes a parameter $\theta_i$** that controls the conditional law of $Y_i \mid X_i$. The AMM deviation $\Delta_i = \Delta(x_i, \theta_{\text{ref}})$ is a **predictive functional** of $X_i$ and $\theta_{\text{ref}}$: it has no counterfactual content per se.
+> - **CATE/ITE individualize a counterfactual difference $\tau(x) = \mu_1(x) - \mu_0(x)$** defined on potential outcomes $(Y(0), Y(1))$. It has counterfactual content by definition: it asks what would have happened to individual $i$ under a different treatment.
+>
+> The two objects coincide **only under the specific bridge conditions of Theorem 8B** (i.e., when the AMM parameter $\theta_i$ is interpreted as the pair of potential-outcome conditional means and the causal-identification assumptions (IGN)+(OVL)+(CONS) hold). Without that bridge, $\Delta_i$ is **not** a CATE estimate and should not be interpreted as one.
+
+*Argument.* AMM is defined entirely on observable conditional distributions $(Y_i \mid X_i)$. The Rubin causal model is defined on the joint distribution of $(Y(0), Y(1))$, only one component of which is observed. The two are at different ontological levels: AMM is on $\mathcal{L}(Y \mid X)$, the Rubin model is on $\mathcal{L}(Y(0), Y(1) \mid X)$. The bridge from one to the other requires identification assumptions ((IGN), (OVL), (CONS)) that connect the two spaces. Under those assumptions, the bridge can be made; without them, the objects remain structurally distinct. $\square$
+
+**Practical implication of Proposition 8A.** The framework's default treatment of $\Delta_i$ is **functional-predictive**: it is the deviation in the parameter of $Y_i \mid X_i$ from the population reference, and it is interpreted as such. Users who want to interpret $\Delta_i$ as a treatment effect must explicitly invoke the bridge conditions of Theorem 8B; the library reports a clear warning when treatment-effect language is applied to AMM output without invoking the bridge.
+
+---
+
+# **5. Theorem 8B: The AMM-to-CATE Bridge as an Explicit Reparametrization**
+
+**The bridge is not automatic.** AMM as developed in Blocks 1-7 individualizes a parameter $\theta_i$ controlling the conditional law of $Y_i \mid X_i$; it does **not** by default identify a counterfactual treatment effect. The bridge to CATE estimation requires the user to make **two explicit choices**:
+
+(a) **A reparametrization choice.** The user specifies the AMM parameter as $\theta_i = (\mu_0(x_i), \mu_1(x_i))$, the pair of potential-outcome conditional means. **This is a modelling decision** that turns a generic predictive parameter into a counterfactual object; it is not entailed by the AMM hypotheses themselves.
+
+(b) **A causal-identification commitment.** The user invokes the standard Rubin-causal-model hypotheses (IGN), (OVL), (CONS) that connect the potential-outcome means to observable conditional means.
+
+Theorem 8B states the consequence of making these two choices: the AMM machinery of Blocks 1-7 then estimates the CATE function. **The theorem is a statement about what AMM becomes under these explicit choices, not a statement that AMM "is already" a CATE estimator.**
+
+> **Theorem 8B (AMM reparametrized as CATE estimator).** Suppose the user has made the two explicit choices above ---specifically:
+>
+> - **(REPAR)** The AMM parameter is specified as $\theta_i = (\mu_0(x_i), \mu_1(x_i)) \in \mathbb{R}^2$ (or higher-dim if the outcome is multivariate), with $\mu_t(x) = \mathbb{E}[Y(t) \mid X = x]$ the conditional potential-outcome means.
+> - **(IGN) Ignorability:** $(Y(0), Y(1)) \perp T \mid X$.
+> - **(OVL) Overlap:** $0 < \Pr(T = 1 \mid X = x) < 1$ for $\mu$-a.e. $x$.
+> - **(CONS) Consistency / SUTVA:** $Y_i = T_i Y_i(1) + (1 - T_i) Y_i(0)$.
+>
+> Suppose also:
+>
+> - The AMM identifiability hypotheses of Theorem 1A (LIN, FIC, etc.) hold for the joint $(\mu_0, \mu_1)$ specification under (REPAR).
+> - (D-ID) for the response distribution.
+>
+> Then **under the reparametrization (REPAR) and the causal-identification commitments (IGN)+(OVL)+(CONS) jointly**, the AMM identifies the CATE function as a measurable functional of $\theta_i$:
+> $$\tau(x) \;=\; \mu_1(x) - \mu_0(x) \;=\; \theta_{i,2} - \theta_{i,1} \quad \text{(read off from $\theta_i$)},$$
+> and the AMM-fitted estimate $\widehat\tau_n(x) = \widehat\theta_{i, 2} - \widehat\theta_{i, 1}$ converges to $\tau(x)$ at the rate determined by the relevant Path's asymptotic theory (Theorems 4A-4C, 5A-5C, or Propositions 6A-6D, depending on Path).
+>
+> **Without (REPAR) or any of (IGN), (OVL), (CONS), the AMM-fitted $\Delta_i$ is a predictive deviation, not a CATE estimate.** The bridge does not apply to AMM specifications in which $\theta_i$ has any other interpretation (e.g., $\theta_i$ as the rate of a Poisson distribution without a treatment indicator), nor to AMM specifications in which causal-identification assumptions are not invoked.
+
+*Argument.* Under (IGN)+(OVL)+(CONS), $\mu_t(x) = \mathbb{E}[Y \mid X = x, T = t]$ is identified from observable data (Imbens-Rubin 2015, Theorem 12.1). The AMM-specified $\theta_i = (\mu_0(x_i), \mu_1(x_i))$ is therefore identified from observable data in the same conditions. By Theorem 1A of Block 1 (joint AMM identifiability), the components $(\theta_{\text{ref}}, a, b, W)$ are identified, hence so is $\theta_i$ for each $x_i$. The CATE follows by linear functional: $\tau(x) = \theta_{i, 2} - \theta_{i, 1}$. $\square$
+
+**Practical content of Theorem 8B.**
+
+When the user invokes the bridge ((IGN)+(OVL)+(CONS) explicitly added to the AMM specification), the AMM output:
+
+(a) **Identifies the CATE** at every $x$ in $\mathrm{supp}(\mu)$.
+
+(b) **Inherits the asymptotic theory** of the relevant Path: contraction rate from Theorem 4B (Path 1), 5B (Path 2), or 6A/6D (Path 3, partial).
+
+(c) **Provides a BvM-type credible interval** for $\tau(x)$ via the marginal posterior of $\theta_{i, 2} - \theta_{i, 1}$ (Theorem 4C / Proposition 4C-semi for Path 1; Theorem 5C for Path 2; explicitly delicate for Path 3).
+
+(d) **Allows AMM-style identifiability diagnostics** (Proposition 1C, Block 2 validity battery) to be **inherited** as diagnostics of the CATE estimate's reliability, with the framework's centering and FIC machinery providing systematic structure that meta-learner-style CATE estimators do not always have.
+
+**Important caveat: violations of (IGN), (OVL), (CONS) break the bridge.** If any of (IGN), (OVL), (CONS) fails, $\theta_i$ is no longer the pair of true potential outcome means, and $\widehat\theta_{i, 2} - \widehat\theta_{i, 1}$ is no longer identifying the CATE. In that case, the AMM still produces a valid functional-predictive estimate (under Theorem 1A and Block 2 conditions), **but its causal interpretation is lost**.
+
+---
+
+# **6. Proposition 8C: Conceptual Placement of CATE Meta-Learners within AMM**
+
+The CATE-meta-learner literature (Künzel, Sekhon, Bickel, Yu 2019; Nie and Wager 2021; Chernozhukov et al. 2018) proposes specific schemes to estimate $\tau(x)$ from data. Under the bridge of Theorem 8B, each meta-learner can be **conceptually located** within the AMM framework.
+
+**Status of the correspondences below: conceptual / structural, not algorithmic.** The mappings of Proposition 8C are **theoretical placements** of each meta-learner within the AMM canonical form. They identify **where each meta-learner sits** in the AMM hierarchy of Paths and configurations. They are **not** claims that the AMM framework, as currently developed, **mechanically reproduces** the algorithmic pipeline of any specific meta-learner, with all its implementation choices: split-fitting, cross-fitting, honest splitting, ensembling, regularization tuning, internal hyperparameter selection, and so on. Each meta-learner paper specifies a concrete algorithmic recipe; the AMM correspondence below tells the reader **what role that recipe plays in the framework's typology**, not that the framework exactly executes the recipe.
+
+**Why this caveat matters at the present stage.** This block is part of the theoretical addendum, written before the framework's algorithmic implementation is closed. **Algorithmic equivalence between AMM and any specific meta-learner** is a separate question to be settled when the implementation phase is reached. At that point, the correspondences below will be either confirmed at the operational level or refined with the differences made explicit (additional implementation-specific steps that AMM does not by default include, etc.). For now, the correspondences are honest **theoretical placements**, useful for the reader who wants to know where a familiar meta-learner sits within the framework but **not** a guarantee that the framework's fitting procedure produces numerically identical output to that meta-learner.
+
+> **Proposition 8C. Conceptual placement (not algorithmic reproduction) of CATE meta-learners within the AMM framework.**
+>
+> Under the bridge of Theorem 8B (i.e., (REPAR), (IGN), (OVL), (CONS) jointly), each major CATE meta-learner has a **conceptual placement** within an AMM configuration. Algorithmic equivalence at the implementation level is a separate question deferred to the implementation phase.
+>
+> - **S-learner (Künzel et al. 2019).** *Algorithmic recipe*: fit a single model $\widehat\mu(x, t) = \mathbb{E}[Y \mid X = x, T = t]$ across the joint $(X, T)$ space, then $\widehat\tau(x) = \widehat\mu(x, 1) - \widehat\mu(x, 0)$. *Conceptual AMM placement*: AMM with $T$ as part of the covariate vector, fitting a single $\theta(x, t)$ via Path 1, 2, or 3.
+>
+> - **T-learner (Künzel et al. 2019).** *Algorithmic recipe*: fit two separate models $\widehat\mu_0(x), \widehat\mu_1(x)$ on treated and control samples, then $\widehat\tau(x) = \widehat\mu_1(x) - \widehat\mu_0(x)$. *Conceptual AMM placement*: AMM applied to two **groups** (treated, control) separately, with each group's parameters fit independently. Conceptually adjacent to (HOM)-failure-aware AMM that splits when the treatment indicator defines a structural sub-population.
+>
+> - **X-learner (Künzel et al. 2019).** *Algorithmic recipe*: combines T-learner with a cross-sample augmentation step that uses residuals from one group to inform the CATE in the other, then weights by propensity. *Conceptual AMM placement*: AMM with **shared $\theta_{\text{ref}}$** across treated and control groups, with the deviation $\Delta$ capturing the treatment-specific departure; the cross-step corresponds (conceptually, not in implementation detail) to AMM's natural sharing of information through the population reference.
+>
+> - **R-learner (Nie and Wager 2021).** *Algorithmic recipe*: uses the **Robinson representation** to decompose the loss into a residual-on-residual regression, with cross-fitted nuisance estimators for outcome and propensity, achieving Neyman-orthogonality. *Conceptual AMM placement*: AMM with an orthogonalization of the propensity-score residual analogous to the orthogonal-class construction of Block 3 §7 (Theorem 3.5). Operational equivalence requires reproducing the cross-fitting and orthogonality steps explicitly, which is not part of AMM by default.
+>
+> - **Causal forests (Wager and Athey 2018).** *Algorithmic recipe*: random forests with honest splitting (separate samples for splits and for leaf-mean estimation), with explicit asymptotic-normality guarantees. *Conceptual AMM placement*: a tree-based variant of Path 2 (or, more loosely, Path 3 with tree-structured architecture), with the honesty condition as an additional implementation requirement that the AMM framework would need to layer on.
+>
+> - **BART for causal inference (Hill 2011).** *Algorithmic recipe*: Bayesian additive regression trees applied to the joint $(X, T)$ space, with default priors and MCMC. *Conceptual AMM placement*: Path 1 (Bayesian) with a BART-shaped prior on $\mu(x, t)$. Operational equivalence depends on prior specification matching BART's default choices.
+>
+> - **Double/debiased machine learning (Chernozhukov et al. 2018).** *Algorithmic recipe*: cross-fitting plus Neyman-orthogonal moment conditions for $\sqrt{n}$-consistent ATE/CATE estimation. *Conceptual AMM placement*: not a direct AMM placement at the same level as the meta-learners above; DML is a **separate methodological layer** that can in principle be applied **on top of** AMM Path 1 or Path 2 to obtain $\sqrt{n}$-rate estimates of summary functionals when the underlying Path is non-parametric.
+
+The map shows that **the CATE meta-learner literature does not propose a single estimator: it proposes a family of decomposition strategies**, each of which can be conceptually located within the AMM framework when the bridge of Theorem 8B is invoked.
+
+**The framework's contribution to the CATE literature** is therefore not a new estimator, but **a systematic conceptual perspective**: the AMM canonical form with its identifiability theorems and three estimation paths gives a **structured place** for each meta-learner in a unified diagnostic and asymptotic apparatus. Under the bridge, the framework's centering / FIC / validity diagnostics (Blocks 1-2) become diagnostics of CATE estimation reliability that meta-learner papers do not always provide.
+
+**Caveat (re-emphasized): conceptual placement is not algorithmic reproduction.** Each meta-learner has specific implementation details (cross-fitting schemes for R-learner, honest splitting for causal forests, ensembling for BART, propensity weighting for X-learner) that the AMM framework's default fitting procedure may approximate but does **not** automatically reproduce. The correspondences in this section are **theoretical placements** valid as such; **operational equivalence** is a separate question that will be addressed when the algorithmic implementation of the framework is closed and explicit comparisons can be made on shared benchmark data. The framework's positioning is "AMM is a unified canonical form **within which** meta-learners are conceptually located", not "AMM as currently specified literally implements every meta-learner's algorithmic recipe".
+
+---
+
+# **7. Proposition 8D: Decision-Theoretic Position and the "Fundamental Problem"**
+
+The Fundamental Problem of Causal Inference (Holland 1986) states that **individual treatment effects $\tau_i$ are never directly observable**: only one of the potential outcomes is realized per individual. CATE $\tau(x)$ is identifiable from observable data only under (IGN)+(OVL)+(CONS); ITE $\tau_i$ remains a counterfactual object even under those.
+
+Different schools of thought adopt different stances on this problem (Pearl 2009 graph-theoretic; Imbens-Rubin 2015 potential-outcomes; Dawid 2000 decision-theoretic). The framework's position on this debate is articulated by the following proposition.
+
+> **Proposition 8D. AMM's stance on the fundamental problem.**
+>
+> The framework is **functional-predictive by default** and **does not commit to a counterfactual ontology**. Specifically:
+>
+> (i) The AMM parameter $\theta_i$ is interpreted as a **structural disposition** of the individual's response distribution: $\theta_i$ governs $Y_i \mid X_i$ in the regime defined by (HOM)+(REG)+(CLOS) of Block 2.
+>
+> (ii) The AMM deviation $\Delta_i = \Delta(x_i, \theta_{\text{ref}})$ is interpreted as **how that disposition departs from the population reference**, which is a **gnoseological aggregate** (Block 2 §2) of the system's structural pattern.
+>
+> (iii) Counterfactual interpretation of $\Delta_i$ as a treatment effect requires an **explicit additional invocation** of (IGN)+(OVL)+(CONS), via Theorem 8B. The framework does not impose this counterfactual interpretation by default; users who want it must layer it on.
+
+**Alignment with Dawid (2000).** Dawid argues that decision-theoretic causal inference can proceed without counterfactuals: rather than asking "what would have happened to individual $i$ under treatment", the question becomes "what is the optimal treatment policy given the observable data". The AMM framework operates in this mode: $\Delta_i$ informs prediction and decision under the regime defined by (HOM)+(REG)+(CLOS), without making the counterfactual claim that $\Delta_i$ is the gain individual $i$ would receive from a (possibly never-realized) intervention.
+
+**Alignment with the framework's broader position.** Block 2 introduced $\theta_{\text{ref}}$ as a **gnoseological real abstraction** of the system, not as an ontological entity in any individual. Proposition 8D extends this stance to $\Delta_i$: it is a **functional individualization** of how individual $i$'s structural pattern departs from the system's aggregate, not a counterfactual claim about an alternative individual $i$ under a different treatment.
+
+**Practical content.** Users who explicitly want CATE/ITE interpretation can invoke Theorem 8B with the additional causal-identification hypotheses. The framework supports this: the user declares the bridge conditions, the library checks them where verifiable (overlap diagnostic via the propensity score; ignorability is fundamentally untestable but the user is asked to commit to it explicitly), and the AMM output is then re-interpreted as CATE estimation. **Without the explicit declaration, the framework reports $\Delta_i$ as a predictive deviation, not as a treatment effect**, and warns the user if the language drifts into causal claims.
+
+---
+
+# **8. Recommendation by Scenario**
+
+The framework's recommendation for users coming from the CATE/ITE literature:
+
+| Scenario | Question | Recommended approach |
+|:---------|:---------|:---------------------|
+| Observational data with treatment, ignorability defensible | What is $\tau(x)$? | Invoke Theorem 8B bridge, apply AMM Path 1/2 with $\theta_i = (\mu_0(x), \mu_1(x))$ specification |
+| Observational data, ignorability uncertain | What can be said about $\tau(x)$ without committing? | Use AMM in default functional-predictive mode; report $\Delta_i$ as predictive deviation, **not** as CATE |
+| Randomized experiment, internal validity high | What is $\tau(x)$ for the trial population? | (IGN) holds by design; invoke Theorem 8B bridge directly |
+| Multiple groups, no treatment indicator | How do groups differ? | AMM in default mode; no causal interpretation, just structural individualization |
+| Time-series with intervention | Effect of intervention? | AMM with interrupted-time-series structure; (IGN)+(OVL)+(CONS) require careful design verification |
+| Multi-arm treatment | What is $\tau(x; t_a, t_b)$? | Theorem 8B extends with $\theta_i$ now $K$-dim (one per arm); compatible with multi-arm meta-learners |
+
+The decision rule is simple: **default to functional-predictive mode**; invoke the bridge of Theorem 8B only when the user has substantive grounds (design or domain knowledge) to commit to (IGN)+(OVL)+(CONS).
+
+---
+
+# **9. Open Questions**
+
+**(O1-CATE) Sensitivity analysis bridge.** When (IGN) is uncertain ---which is the typical observational setting--- sensitivity analysis frameworks (Rosenbaum 2002; VanderWeele and Ding 2017) bound the bias of CATE estimates under unmeasured confounding. **Adapting these sensitivity-analysis frameworks to AMM** ---i.e., expressing the bound on $\Delta_i$'s causal interpretation as a function of an unobserved-confounding parameter--- is an open question.
+
+**(O2-CATE) Propensity-score-based weighting in the AMM context.** Standard CATE estimators use inverse propensity weighting (IPW) or outcome modelling under (IGN)+(OVL). The AMM framework as developed in Blocks 1-7 does not weight by propensity; the bridge of Theorem 8B uses outcome modelling alone. Whether IPW-style weighting can be incorporated into AMM ---and whether doing so improves the bridge's robustness--- is open.
+
+**(O3-CATE) ITE estimation.** CATE is identifiable under (IGN)+(OVL)+(CONS); ITE remains counterfactual. The AMM framework does not estimate ITE in any deeper sense than $\widehat\tau(x_i)$ + uncertainty. Whether there is a formal sense in which AMM can estimate "individual-level" effects beyond $\tau(x)$ ---perhaps via bounds (Manski 2003) or via assumptions about ITE heterogeneity--- is open.
+
+**(O4-CATE) Doubly-robust extensions.** Doubly-robust CATE estimators (van der Laan and Rubin 2006; Chernozhukov et al. 2018) achieve $\sqrt{n}$ consistency under either correct outcome modelling **or** correct propensity modelling. Whether AMM admits a doubly-robust extension ---and whether this is operationally distinct from simply applying DML on top of AMM Path 1/2--- is open.
+
+**(O5-CATE) Multi-level / hierarchical CATE.** When the treatment effect varies systematically across higher-level groups (e.g., schools, hospitals), CATE generalizes to a hierarchical CATE. The AMM framework's hierarchical structure should accommodate this naturally, but the formal connection to multi-level CATE estimators (Athey, Tibshirani, Wager 2019 generalized random forests with hierarchical structure) is not closed.
+
+---
+
+# **10. Implementation Implications**
+
+The framework's `gdpar` package realises the AMM-to-CATE bridge as a separate operational entry point (canonised in Sub-phase 8.5.A) rather than as a flag on the main `gdpar()` call. The companion vignette `v08b_cate_ite_bridge_implementation` develops the canonical theory of the T-learner AMM-side bridge; the operational recipes live in `vop06_meta_learner_comparison`.
+
+### **10.1. Bridge invocation**
+
+The user fits two AMM models, one per treatment arm, with the standard `gdpar()` interface, and then constructs the bridge object by calling `gdpar_causal_bridge(fit_treat, fit_ctrl, newdata, type, level)`. The constructor performs the structural-compatibility checks specified in `v08b` §5 (path coincidence, hierarchical regime coincidence, family coincidence, dimension coincidence, AMM-level coincidence, anchor coincidence) and aborts with `gdpar_unsupported_feature_error` whenever any check fails. The four operational obligations of the bridge ---**(OVL)** overlap of the two arm-specific covariate supports, **(IGN)** the unconfoundedness commitment, **(CONS)** the SUTVA convention, and the **AMM-to-CATE re-interpretation** $\widehat\tau(x) = \widehat\theta_{i, 2} - \widehat\theta_{i, 1}$ with arm-aligned posteriors--- are documented in `v08b` §4 (identification assumptions) and §5 (estimation contract); the user remains responsible for the substantive declaration of (IGN), which is fundamentally untestable from observable data.
+
+### **10.2. Reporting**
+
+The resulting object of class `gdpar_causal_bridge` exposes the S3 methods `print`, `summary`, and `predict`. The `summary` method returns a per-observation CATE table $\widehat\tau(x)$ together with the marginal ATE and credible/confidence bands inherited from the underlying Path; the `print` method displays the structural compatibility verdict plus the CATE-mean header; the `predict` method re-evaluates the CATE on a fresh covariate grid without re-running the compatibility checks. The functional-predictive output $\widehat\Delta_i$ remains available from the underlying `gdpar_fit` objects per arm via the standard `coef()` and `predict()` methods (see vignettes `vop01`-`vop05` for the AMM-side workflow). The bridge object does **not** silently re-label deviations as CATEs unless the user has explicitly constructed it via `gdpar_causal_bridge()`; the canonical voice of `gdpar_fit` remains the AMM functional-predictive deviation.
+
+### **10.3. Comparison with meta-learner libraries**
+
+The framework provides `gdpar_compare_meta_learners(bridge, methods, newdata, data, seed)` (canonised in Sub-phase 8.5.B) for cross-method concordance studies. The function takes a `gdpar_causal_bridge` object plus a named list of meta-learner adapters constructed via `gdpar_meta_learner_adapter()`; two reference adapters ship with the package, `gdpar_adapter_grf()` (causal forest via the R-side `grf` package) and `gdpar_adapter_econml()` (Causal Forest DML / Double Machine Learning via the Python-side EconML package through `reticulate`). Additional adapters following the two-layer contract `fit_predict_fun` + optional `predict_fun` can be registered by the user without modifying the package; the operational vignette `vop06_meta_learner_comparison` gives the canonical recipe for DoubleML and analogous methods. The comparison output is structured according to Proposition 8C and `v08c` §5 (concordance criterion): each meta-learner is mapped to its AMM correspondence, and the pairwise discrepancies on $\widehat\tau(x)$ are reported as RMSE / Pearson / MAD matrices with diagnostic interpretation. The companion vignette `v08c_meta_learner_comparison` canonises the theory of the comparator (pluggable contract, concordance properties 5.1-5.3, identification per arm, scope limits).
+
+---
+
+# **11. Summary**
+
+This block has positioned the AMM framework relative to the CATE/ITE literature with the following structure:
+
+1. **Object-level distinction (Proposition 8A)**: AMM individualizes a predictive parameter; CATE/ITE individualize a counterfactual difference. The two objects are structurally distinct and coincide only under explicit causal-identification assumptions.
+
+2. **Technical bridge (Theorem 8B)**: under the **explicit reparametrization (REPAR)** $\theta_i = (\mu_0(x_i), \mu_1(x_i))$ together with the causal-identification commitments (IGN)+(OVL)+(CONS) and the AMM identifiability hypotheses, the AMM identifies the CATE function. The bridge transfers AMM's contraction rates and credible intervals to CATE estimation. **The bridge is not automatic**: it requires the user to make both the reparametrization choice and the causal-identification commitment explicitly.
+
+3. **Methodological positioning (Proposition 8C)**: each major CATE meta-learner ---S, T, X-learner; R-learner; causal forests; BART for causal; DML--- has a **conceptual placement** within an AMM configuration under the bridge. **These placements are theoretical / structural, not claims of algorithmic equivalence** with the meta-learners' specific implementation pipelines (cross-fitting, honest splitting, propensity weighting, ensembling, etc.). Algorithmic equivalence is a separate question deferred to the framework's implementation phase. The framework's contribution at this level is a **systematic conceptual perspective**, not a new estimator and not an implementation reproduction.
+
+4. **Decision-theoretic stance (Proposition 8D)**: AMM is functional-predictive by default and does not commit to a counterfactual ontology, aligning with Dawid (2000) and with Block 2's gnoseological treatment of $\theta_{\text{ref}}$. Counterfactual interpretation is an explicit add-on, not a default.
+
+5. **Recommendation by scenario** (§8): default to functional-predictive mode; invoke the bridge only with substantive grounds for (IGN)+(OVL)+(CONS).
+
+6. **Five open questions** (§9): sensitivity analysis bridge; propensity-score weighting in AMM; ITE estimation beyond CATE; doubly-robust extensions; multi-level / hierarchical CATE.
+
+7. **Implementation diagnostics** (§10): explicit bridge invocation, propensity-overlap verification, ignorability commitment, dual reporting (functional-predictive + CATE-interpreted), and comparison with meta-learner libraries.
+
+The framework **does not subsume the CATE literature**; it provides a **systematic place** for CATE estimators within a unified canonical form, with the bridge of Theorem 8B making the connection explicit and the meta-learner correspondences of Proposition 8C making the comparison concrete.
+
+---
+
+# **12. Connections to Subsequent Blocks**
+
+- **Block 9** (cognitive motivation) closes the addendum by tying the framework's functional-predictive stance back to the cognitive analogy of the overview vignette: the driver's predictive individualization of other drivers is functional-predictive (counterfactual interpretation is not invoked); this matches the framework's default treatment of $\Delta_i$.
+- **The empirical discrimination protocol of Block 1 §6.8.1** applies to bridge-invoked CATE estimation under Path 3: when Path 3 is used to estimate CATE and Path 1 is feasible on the same data, the four-step discrimination protocol detects whether the Path 3 CATE estimate captures real heterogeneity or reflects undetected non-identifiability.
+
+---
+
+# **Appendix A. CATE/ITE Notation**
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $T_i \in \{0, 1\}$ | Treatment indicator |
+| $Y_i(0), Y_i(1)$ | Potential outcomes for individual $i$ |
+| $Y_i$ | Observed outcome |
+| $\tau_i = Y_i(1) - Y_i(0)$ | Individual treatment effect (ITE) |
+| $\tau(x) = \mathbb{E}[Y(1) - Y(0) \mid X = x]$ | Conditional average treatment effect (CATE) |
+| $\mu_t(x) = \mathbb{E}[Y(t) \mid X = x]$ | Conditional potential outcome mean |
+| $e(x) = \Pr(T = 1 \mid X = x)$ | Propensity score |
+| (IGN) | Ignorability / unconfoundedness |
+| (OVL) | Overlap / positivity |
+| (CONS) | Consistency / SUTVA |
+
+---
+
+# **Appendix B. CATE/ITE Hypothesis Table**
+
+| Hypothesis | Content | Used by |
+|:-----------|:--------|:--------|
+| (REPAR) | AMM parameter specified as $\theta_i = (\mu_0(x_i), \mu_1(x_i))$ (reparametrization toward potential outcomes) | Theorem 8B |
+| (IGN) | $(Y(0), Y(1)) \perp T \mid X$ | Theorem 8B, all CATE estimators |
+| (OVL) | $0 < \Pr(T = 1 \mid X) < 1$ for $\mu$-a.e. $X$ | Theorem 8B, all CATE estimators |
+| (CONS) | $Y_i = T_i Y_i(1) + (1 - T_i) Y_i(0)$ | Theorem 8B, all CATE estimators |
+| (BRIDGE) | (REPAR) + (IGN) + (OVL) + (CONS) jointly invoked | Theorem 8B AMM-to-CATE transfer |
+
+---
+
+# **References Cited in This Block**
+
+Athey, S., Tibshirani, J., and Wager, S. (2019). Generalized random forests. *Annals of Statistics*, 47(2), 1148--1178.
+
+Chernozhukov, V., Chetverikov, D., Demirer, M., Duflo, E., Hansen, C., Newey, W., and Robins, J. (2018). Double/debiased machine learning for treatment and structural parameters. *Econometrics Journal*, 21(1), C1--C68.
+
+Dawid, A. P. (2000). Causal inference without counterfactuals. *Journal of the American Statistical Association*, 95(450), 407--424.
+
+Hill, J. L. (2011). Bayesian nonparametric modeling for causal inference. *Journal of Computational and Graphical Statistics*, 20(1), 217--240.
+
+Holland, P. W. (1986). Statistics and causal inference. *Journal of the American Statistical Association*, 81(396), 945--960.
+
+Imbens, G. W., and Rubin, D. B. (2015). *Causal Inference for Statistics, Social, and Biomedical Sciences*. Cambridge University Press.
+
+Künzel, S. R., Sekhon, J. S., Bickel, P. J., and Yu, B. (2019). Metalearners for estimating heterogeneous treatment effects using machine learning. *PNAS*, 116(10), 4156--4165.
+
+Manski, C. F. (2003). *Partial Identification of Probability Distributions*. Springer.
+
+Nie, X., and Wager, S. (2021). Quasi-oracle estimation of heterogeneous treatment effects. *Biometrika*, 108(2), 299--319.
+
+Pearl, J. (2009). *Causality: Models, Reasoning, and Inference*, 2nd ed. Cambridge University Press.
+
+Rosenbaum, P. R. (2002). *Observational Studies*, 2nd ed. Springer.
+
+van der Laan, M. J., and Rubin, D. (2006). Targeted maximum likelihood learning. *International Journal of Biostatistics*, 2(1).
+
+VanderWeele, T. J., and Ding, P. (2017). Sensitivity analysis in observational research: introducing the E-value. *Annals of Internal Medicine*, 167(4), 268--274.
+
+Wager, S., and Athey, S. (2018). Estimation and inference of heterogeneous treatment effects using random forests. *Journal of the American Statistical Association*, 113(523), 1228--1242.

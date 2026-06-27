@@ -1,0 +1,346 @@
+---
+title: "**Dependence-Robust Inference in gdpar (Axis 2)**"
+subtitle: "Making the uncertainty honest under temporal and spatial dependence, without modelling it (Block 9, Axis 2)"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Dependence-Robust Inference in gdpar (Axis 2)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  collapse = TRUE, comment = "#>",
+  eval = FALSE
+)
+```
+
+# **1. What this vignette covers**
+
+gdpar's Path 1 estimates — Empirical-Bayes (`gdpar_eb`) or full-Bayes
+(`gdpar`) — assume the observations are **conditionally independent** given the
+mean structure. When the data carry **temporal** (serial) or **spatial**
+autocorrelation, that assumption is violated: the point estimates remain
+consistent if the mean structure is correctly specified, but the model-based
+(posterior / Laplace) standard errors are **too narrow** and the intervals
+**under-cover**. Sections 2–3 use the Empirical-Bayes path; Section 4 shows the
+identical workflow on a full-Bayes fit.
+
+Axis 2 of Block 9 is the *inferential* response to this. It is deliberately
+**not** a model of the dependence:
+
+> **Honest scope.** gdpar does **not** model the correlated noise or the spatial
+> random field (that is Axis 1 / a later modelling block, deferred and
+> evidence-gated). Axis 2 only makes the *inference* robust to dependence. The
+> stance is the working-independence + robust-variance estimator of
+> Liang & Zeger (1986): the **point estimates are unchanged**; only the reported
+> uncertainty is re-estimated to be dependence-robust.
+
+Two symmetric pairs of functions, sharing one internal refit engine:
+
+| Dependence | Diagnostic | Robust SE / intervals |
+|---|---|---|
+| **Temporal** | `gdpar_dependence_diagnostic()` | `gdpar_dependence_robust()` |
+| **Spatial** | `gdpar_spatial_dependence_diagnostic()` | `gdpar_spatial_dependence_robust()` |
+
+The workflow is always the same: **diagnose first**, and only if dependence is
+flagged, **re-estimate the uncertainty**.
+
+# **2. The temporal pair (recap)**
+
+```{r temporal}
+library(gdpar)
+
+set.seed(1)
+n <- 150
+x <- rnorm(n)
+# AR(1) errors: serial dependence the working-independence fit ignores.
+y <- 1 + 0.5 * x + as.numeric(stats::arima.sim(list(ar = 0.6), n))
+df <- data.frame(x = x, y = y, t = seq_len(n))
+
+fit <- gdpar_eb(y ~ x, amm = amm_spec(a = ~ x), data = df,
+                chains = 2, iter_warmup = 300, iter_sampling = 300)
+
+# Step 1 — diagnose. Lag-1 autocorrelation, Durbin-Watson, Ljung-Box.
+gdpar_dependence_diagnostic(fit, index = df$t)
+
+# Step 2 — if flagged, re-estimate the uncertainty by a temporal block bootstrap.
+gdpar_dependence_robust(fit, data = df, index = df$t, B = 199, seed = 1)
+```
+
+The robust table reports, per coefficient, the `estimate` (unchanged), the
+`model_se`, the bootstrap `robust_se`, their ratio `se_ratio` and percentile
+`ci_lower` / `ci_upper`. A `se_ratio > 1` means the model-based SE understates
+the dependence-robust SE.
+
+**The block length.** By default `block_length = NULL` uses the rate-optimal
+`round(n^(1/3))` (it fixes only the *rate*). You may fix an integer manually, or
+let the data choose it:
+
+```{r temporal-auto}
+# Data-driven block length: the Politis-White (2004) automatic selector,
+# computed from the residuals (no extra refit), with the rate as fallback.
+gdpar_dependence_robust(fit, data = df, index = df$t,
+                        block_length = "auto", B = 199, seed = 1)
+```
+
+`"auto"` runs the canonical Politis & White (2004) rule (Patton, Politis & White
+2009 correction): it reads the residual autocorrelations, finds the lag beyond
+which they are negligible, and returns
+`b_opt = (2 ĝ² / D)^(1/3) n^(1/3)` with the overlapping-block constant
+`D = (4/3) spec²`. Stronger serial dependence gives a longer block; white-noise
+residuals give unit blocks; a degenerate series falls back to the rate. The
+chosen value and method are reported in `block_length` and
+`block_length_method`. (The selector assumes the fitted parameter count is small
+relative to `n`.)
+
+# **3. The spatial pair**
+
+The spatial functions replace exactly two pieces of the temporal machinery — the
+**statistic** (lag-1 autocorrelation becomes **Moran's I**) and the
+**resampling** (1-D contiguous blocks become **2-D spatial blocks**) — and reuse
+everything else.
+
+## 3.1. Diagnostic: Moran's I
+
+```{r spatial-diagnostic}
+set.seed(2)
+n <- 200
+gx <- runif(n); gy <- runif(n)            # spatial coordinates
+x <- rnorm(n)
+# An omitted smooth spatial trend lands in the residuals.
+y <- 1 + 0.5 * x + 3 * (gx + gy) + rnorm(n, sd = 0.3)
+df <- data.frame(x = x, y = y)
+
+fit_sp <- gdpar_eb(y ~ x, amm = amm_spec(a = ~ x), data = df,
+                   chains = 2, iter_warmup = 300, iter_sampling = 300)
+
+gdpar_spatial_dependence_diagnostic(fit_sp, coords = cbind(gx, gy), seed = 1)
+```
+
+Moran's I is
+
+$$
+I \;=\; \frac{n}{S_0}\,
+        \frac{\sum_i \sum_j w_{ij}\,(r_i - \bar r)(r_j - \bar r)}
+             {\sum_i (r_i - \bar r)^2},
+\qquad S_0 = \sum_i \sum_j w_{ij},
+$$
+
+with $r$ the residuals and $W = (w_{ij})$ a **spatial weight matrix**. Under the
+null of spatial exchangeability $\mathbb{E}[I] = -1/(n-1)$.
+
+**Choosing the weights.** By default gdpar builds a **row-standardized
+$k$-nearest-neighbour** graph (so $S_0 = n$), with the declared heuristic
+$k = \max(4, \min(\lfloor \log n \rceil, n-1))$ — robust to irregular spacing and
+guaranteeing no isolated point. Alternatives:
+
+* `weights = "distance"` — a distance band whose threshold is the smallest that
+  isolates no location.
+* `W = <your matrix>` — supply your own neighbourhood (adjacency, flow network,
+  administrative contiguity). This is the right choice whenever domain knowledge
+  defines the structure; it is row-standardized internally.
+
+**Significance.** The default is a **two-sided permutation test** (`n_perm = 999`):
+the residuals are relabelled across locations, $I$ is recomputed, and
+$p = (1 + \#\{|I_{\text{perm}} - \mathbb{E}[I]| \ge |I - \mathbb{E}[I]|\}) /
+(n_{\text{perm}} + 1)$. It assumes neither normal residuals nor a symmetric $W$,
+so it is safe with Dunn-Smyth residuals and the asymmetric kNN graph. The
+analytic Cliff-Ord normal approximation is available via `test = "analytic"`
+(cheaper, but it warns under an asymmetric $W$).
+
+## 3.2. Robust SE: spatial block bootstrap
+
+```{r spatial-robust}
+gdpar_spatial_dependence_robust(fit_sp, data = df, coords = cbind(gx, gy),
+                                B = 199, seed = 1)
+```
+
+The bounding box of `coords` is tiled into a `g × g` grid; non-empty cells are
+resampled with replacement and concatenated to length `n`. By default the grid
+**origin is randomized** per replicate (`random_origin = TRUE`,
+Politis-Romano-Lahiri), which breaks the deterministic cell-boundary artifact.
+An overlapping `scheme = "moving"` is also available. The output table has the
+same columns as the temporal one.
+
+## 3.3. The default block size, and why `n^(1/4)`
+
+The block side per axis defaults to `g = max(2, round(n^(1/4)))`. This is the
+$d = 2$ case of the rate that minimises the **mean-squared error of the
+block-bootstrap variance estimator**. Writing $M$ for the points per block (so
+the block has linear extent $M^{1/d}$ per axis):
+
+* bias from dependence broken at block edges: $O(M^{-1/d})$ (Künsch 1989; Hall,
+  Horowitz & Jing 1995),
+* estimator variance: $O(M/n)$,
+
+so $\mathrm{MSE}(M) \sim M^{-2/d} + M/n$ is minimised at
+$M \sim n^{\,d/(d+2)}$. At $d = 1$ this gives $M \sim n^{1/3}$ points per
+block — **exactly** the temporal `block_length = round(n^(1/3))` default — and at
+$d = 2$ it gives $M \sim n^{1/2}$, i.e. $g^2 = n/M \sim n^{1/2}$ cells, hence
+$g \sim n^{1/4}$ cells per axis. The exponent is therefore the variance-optimal
+rate that reduces correctly to the canonical temporal rate.
+
+> **Registered dissent (D100).** A decorrelating cross-lineage review argued for
+> the $n^{1/(d+4)}$ rate ($n^{1/6}$ at $d = 2$). That rate governs a *different*
+> estimand — the second-order bias / two-sided distribution-function coverage,
+> which gives $n^{1/5}$ at $d = 1$ and so does **not** reduce to the variance
+> default's $n^{1/3}$. It is recorded as a dissent, not adopted.
+
+## 3.4. Data-driven block size (`block_size = "auto"`)
+
+The default above fixes only the *rate*. Its *constant* can be chosen from the
+data — but, unlike the temporal case, Politis & White (2004) has **no**
+established spatial plug-in (its flat-top spectral-density-at-zero estimator does
+not extend cleanly to a field in the plane). gdpar therefore calibrates the
+cells-per-axis `g` over a grid of candidates:
+
+```{r spatial-auto}
+gdpar_spatial_dependence_robust(fit_sp, data = df, coords = cbind(gx, gy),
+                                block_size = "auto", B = 199, seed = 1)
+```
+
+For each candidate `g`, cheap (no-refit) spatial block resamples give the
+bootstrap variance $V(g)$ of the **design-weighted residual functionals**
+$(1/n)\,[1, \tilde{gx}, \tilde{gy}]^\top z$ — these are the influence directions
+of the coefficient, so their optimal block size matches the coefficient's, which
+the residual mean alone would not. The block size minimises an empirical
+mean-squared error,
+
+$$
+g^\ast \;=\; \arg\min_g\;\Big[\underbrace{(\tilde V(g) - \tilde V(g_{\min}))^2}
+                                       _{\text{squared bias}}
+                            \;+\; \underbrace{c\,V(g)^2 / n_{\text{tiles}}(g)}
+                                       _{\text{variance}}\Big],
+$$
+
+with the bias **anchored at the largest blocks** $g_{\min}$ (the least biased,
+since the dependence-breaking bias of the variance estimator grows like
+$g/\sqrt n$) and the variance scaling like the inverse number of blocks
+(Lahiri 2003). Stronger / longer-range spatial dependence is captured by larger
+blocks (smaller `g`); a short-range or near-independent field by smaller blocks
+(larger `g`); a degenerate calibration falls back to the $n^{1/4}$ rate. The
+choice and method are reported in `block_size` and `block_size_method`.
+
+> **Provenance and honest scope (D101).** A decorrelating cross-lineage review
+> supplied the empirical-MSE skeleton; two of its concrete choices — the bias
+> anchor and the variance term — were **corrected after an audit and empirical
+> validation**, because the proposed forms would have made the selector
+> anticonservative (anchoring at the smallest blocks) or non-adaptive (a
+> Monte-Carlo jackknife variance that vanishes with the resample count). A single
+> **isotropic** `g` is used; strongly anisotropic residual dependence is a
+> documented limitation (the minimal fix, two coordinate-wise calibrations, is
+> deferred). As everywhere in Axis 2, this only sizes the resampling blocks — it
+> does not model the dependence.
+
+# **4. The full-Bayes path**
+
+Everything above was shown on the Empirical-Bayes path (`gdpar_eb`). The exact
+same four functions also accept a **scalar full-Bayes fit** (`gdpar`), so the
+EB/FB asymmetry is closed: diagnose, then — if flagged — re-estimate, with no
+change of API.
+
+```{r fb, eval = FALSE, purl = FALSE}
+# A full-Bayes fit instead of an Empirical-Bayes one:
+fit_fb <- gdpar(y ~ x, amm = amm_spec(a = ~ x), data = df,
+                chains = 2, iter_warmup = 300, iter_sampling = 300)
+
+# Same diagnostic, same robust SE -- only the object class changes.
+gdpar_dependence_diagnostic(fit_fb, index = df$t)
+gdpar_dependence_robust(fit_fb, data = df, index = df$t, B = 199, seed = 1)
+```
+
+What differs is **internal**, and worth understanding before you read the table:
+
+* **Point estimate and model SE.** On the full-Bayes path the per-coefficient
+  point estimate is the **posterior mean** and `model_se` is the **posterior
+  standard deviation** (vs. the Laplace mode / conditional posterior SD on the EB
+  path). `robust_se` is, as always, the block-bootstrap SD of the per-refit point
+  estimate, so `se_ratio = robust_se / model_se` stays a like-for-like SD-vs-SD
+  ratio. The posterior mean / SD are chosen (over median / IQR) to keep that
+  parity and to avoid an undeclared normal-scaling constant.
+* **Cost.** Each refit re-runs the **full** HMC, so a full-Bayes
+  `gdpar_dependence_robust()` is markedly more expensive than the Empirical-Bayes
+  one. Keep `B` modest, and raise `iter_sampling` rather than `B` if the refit
+  ESS (reported in the result's `refit_diagnostics`) is low — a finite-iteration
+  refit slightly and *conservatively* inflates `robust_se`.
+* **Reading `se_ratio` under an informative prior.** Unlike the EB path, a
+  full-Bayes `se_ratio < 1` is usually **benign**: an informative prior
+  concentrates the posterior beyond what the data alone support, so the posterior
+  SD is smaller than the bootstrap SD even under correct independent
+  specification (the conjugate-Gaussian algebra gives
+  $\text{se\_ratio}^2 = n\tau/(n\tau+\tau_0) < 1$ with prior precision
+  $\tau_0$). Only `se_ratio` clearly **above** 1 flags dependence /
+  misspecification.
+* **EB vs FB are different estimands for `theta_ref`.** The EB point estimate is
+  the Laplace *mode*; the full-Bayes one is the posterior *mean*. They coincide
+  asymptotically (Bernstein–von Mises) but may differ in finite samples, so the
+  two paths' tables need not agree to the last digit on the same data.
+* **Convergence accounting.** The result carries `refit_diagnostics` (aggregate
+  `max_rhat`, `min_ess_bulk`, divergent / high-R-hat refit counts). Under-converged
+  refits are **never excluded or down-weighted** — that screen would be
+  non-random and would bias the SE — but a single note is emitted when a refit's
+  R-hat clearly exceeds 1.05.
+
+A *bagged* / widened posterior (BayesBag) would be a different object — a
+re-architected estimator, not a robust variance for the same one — and is a
+deliberately deferred lateral; Axis 2 keeps its honest scope, *robust variance,
+not better estimates*, on both paths.
+
+# **5. Reading the result, and the caveats**
+
+* **`se_ratio > 1`** ⇒ the model-based uncertainty understated the
+  dependence-robust uncertainty; trust the robust interval. **`se_ratio ≈ 1`** ⇒
+  little correction needed.
+* **Coordinates are Euclidean.** Project lon/lat first (e.g. to UTM); raw lon/lat
+  distorts the neighbour graph, severely at high latitudes. Great-circle
+  distance is deliberately not supported, to avoid a heavy **sf** / **geosphere**
+  dependency.
+* **Moran's I tests residual exchangeability, not its cause.** A significant $I$
+  may reflect true spatial dependence **or** model misspecification (e.g. an
+  omitted nonlinear effect). Interpret accordingly — a misspecified mean
+  structure is better fixed than bootstrapped around.
+* **Honest scope, restated.** The bootstrap delivers robust *variance*, not
+  better point estimates, and is valid for weak / short-range dependence
+  relative to the block size; it does not rescue long-memory or strong
+  long-range dependence.
+
+# **References**
+
+* Cliff, A. D. & Ord, J. K. (1981). *Spatial Processes: Models and Applications*.
+  Pion, London.
+* Hall, P., Horowitz, J. L. & Jing, B.-Y. (1995). On blocking rules for the
+  bootstrap with dependent data. *Biometrika* 82(3), 561-574.
+* Künsch, H. R. (1989). The jackknife and the bootstrap for general stationary
+  observations. *Annals of Statistics* 17(3), 1217-1241.
+* Lahiri, S. N. (2003). *Resampling Methods for Dependent Data*. Springer.
+* Liang, K.-Y. & Zeger, S. L. (1986). Longitudinal data analysis using
+  generalized linear models. *Biometrika* 73(1), 13-22.
+* Patton, A., Politis, D. N. & White, H. (2009). Correction to "Automatic
+  block-length selection for the dependent bootstrap". *Econometric Reviews*
+  28(4), 372-375.
+* Politis, D. N. & White, H. (2004). Automatic block-length selection for the
+  dependent bootstrap. *Econometric Reviews* 23(1), 53-70.
+* Moran, P. A. P. (1950). Notes on continuous stochastic phenomena.
+  *Biometrika* 37(1/2), 17-23.
+* Nordman, D. J. & Lahiri, S. N. (2004). On optimal spatial subsample size for
+  variance estimation. *Annals of Statistics* 32(5), 1981-2027.
+* Politis, D. N. & Romano, J. P. (1992). A circular block resampling procedure
+  for stationary data. In *Exploring the Limits of Bootstrap*, 263-270. Wiley.

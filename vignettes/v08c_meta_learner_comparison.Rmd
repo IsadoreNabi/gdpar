@@ -1,0 +1,541 @@
+---
+title: "**Theoretical Addendum -- Block 8.5.B:**"
+subtitle: "Comparison of the AMM-side T-learner against External Meta-learners: Canonization of the Pluggable Adapter Contract"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{Theoretical Addendum 8.5.B: Comparison against External Meta-learners}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+# **1. Purpose and position in the package**
+
+This vignette canonizes the comparator
+`gdpar_compare_meta_learners`, the *companion of the T-learner
+AMM-side bridge* of Sub-phase 8.5.A. The bridge produces a per-
+observation posterior estimate of the conditional average treatment
+effect (CATE),
+$\widehat\tau_{\text{bridge}}(x) = \mathbb{E}\big[\widehat\mu^{(\text{treat})}(x) - \widehat\mu^{(\text{ctrl})}(x) \mid \text{posterior}\big]$,
+documented in `vignette("v08b_cate_ite_bridge_implementation")` and
+positioned in the meta-learner literature in
+`vignette("v08_cate_ite_positioning")`. The comparator extends that
+machinery by accepting *external* meta-learner implementations
+(point estimators with their own native uncertainty quantification
+mechanisms) and reporting the discrepancy between
+$\widehat\tau_{\text{bridge}}$ and each external
+$\widehat\tau_{\text{ext}}$ on a common evaluation grid.
+
+Two reference adapters are distributed with the package:
+
+- `gdpar_adapter_grf()` wraps `grf::causal_forest`
+  (Athey, Tibshirani, Wager, 2019) R-side, with native CIs from the
+  built-in variance estimator under honesty.
+- `gdpar_adapter_econml()` wraps `econml.dml.CausalForestDML`
+  (Chernozhukov et al., 2018) Python-side via `reticulate`, with
+  native CIs from `effect_interval()`.
+
+Both are reference implementations of a *pluggable contract*. Users
+may add adapters for `DoubleML`, doubly-robust estimators, or any
+custom learner without touching the package; the operational recipe
+(grf, EconML, a custom adapter using DoubleML as a worked example,
+plus Python troubleshooting) lives in the companion operational
+vignette `vignette("vop06_meta_learner_comparison")`.
+
+This addendum has the same canonical status as `v08b`: definitions,
+identification, estimation, the concordance criterion, and limits
+are stated here once and not reopened during implementation.
+
+---
+
+# **2. Notation inherited from `v08` and `v08b` (rapid reference)**
+
+We work in the same setup of `v08b`:
+
+- A treatment indicator $T \in \{0, 1\}$ and a continuous outcome
+  $Y \in \mathbb{R}$.
+- A vector of covariates $X \in \mathcal{X} \subseteq \mathbb{R}^p$.
+- Per-observation potential outcomes $Y^{(0)}, Y^{(1)}$ in the
+  Neyman-Rubin sense (Rubin, 1974). Identification of
+  $\tau(x) = \mathbb{E}[Y^{(1)} - Y^{(0)} \mid X = x]$ rests on the
+  conditional ignorability $T \perp\!\!\!\perp (Y^{(0)}, Y^{(1)}) \mid X$,
+  the overlap $0 < \Pr(T = 1 \mid X = x) < 1$, and SUTVA, as
+  detailed in `v02` and recalled in `v08b` §4.
+- Two disjoint training samples (the treatment arm and the control
+  arm) of sizes $n_T$ and $n_C$, with $n_T + n_C = n$ observations
+  total.
+- An evaluation grid $\mathcal{N} = \{x_i^{\text{new}}\}_{i = 1}^{n_{\text{new}}}$
+  on which the CATE is reported.
+
+The bridge produces, for each $x_i^{\text{new}}$, a posterior
+distribution over $\widehat\tau(x_i^{\text{new}})$ of which the mean
+$\widehat\tau_{\text{bridge}}(x_i^{\text{new}})$ and the central
+$\alpha$-credible interval are stored.
+
+An *external meta-learner* is any procedure that, given a single
+stacked dataset $(X_i, T_i, Y_i)_{i = 1}^n$ assembled from the two
+training arms, produces a point estimate
+$\widehat\tau_{\text{ext}}(x_i^{\text{new}})$ at each evaluation
+point and (optionally) a frequentist confidence interval. The
+inferential origin of that interval is heterogeneous across
+methods (the asymptotic Gaussian CI of `grf`, the bootstrap-or-
+asymptotic CI of EconML, the partially linear regression CI of
+DoubleML), and the comparator does not paper over the heterogeneity
+by pooling.
+
+---
+
+# **3. The pluggable adapter contract**
+
+An *adapter* is an R object of class `gdpar_meta_learner_adapter`
+constructed by
+
+```{r contract-adapter, eval = FALSE}
+gdpar_meta_learner_adapter(
+  name,            # character scalar, unique within a comparison
+  fit_predict_fun, # mandatory closure
+  predict_fun,     # optional closure (default NULL)
+  requires_r,      # character vector of R packages needed
+  requires_py,     # character vector of Python modules needed
+  native_ci,       # logical scalar
+  description      # optional character scalar
+)
+```
+
+with closures of signature
+
+\begin{aligned}
+\texttt{fit\_predict\_fun}: \quad &
+(X, Y, T, X_{\text{new}}, \alpha, \text{seed}_{\text{run}})
+\;\longmapsto\;
+\big(\widehat\tau, \widehat{C}, s, \nu\big),\\
+\texttt{predict\_fun}: \quad &
+(s, X_{\text{new}}, \alpha)
+\;\longmapsto\;
+\big(\widehat\tau, \widehat{C}\big),
+\end{aligned}
+
+where $X$ is the training covariate data frame, $Y$ the training
+outcome, $T$ the training treatment indicator, $X_{\text{new}}$ the
+evaluation grid, $\alpha$ the nominal credible level inherited from
+the bridge, $\text{seed}_{\text{run}}$ the per-method seed,
+$\widehat\tau \in \mathbb{R}^{n_{\text{new}}}$ the point estimate,
+$\widehat{C} \in \mathbb{R}^{n_{\text{new}} \times 2}$ the native CI
+(or `NULL` when the adapter does not produce one), $s$ the cached
+fitted state, and $\nu$ a vector of free-form diagnostic notes
+emitted during the fit.
+
+The two-layer structure is deliberate.
+
+**Theorem 3.1 (Soundness of the two-layer contract).** *Let
+$\mathcal{A}$ be an adapter and assume `fit_predict_fun` and
+`predict_fun` are deterministic functions of their arguments. Then
+for any $(X, Y, T)$ training tuple and any evaluation grid
+$X_{\text{new}}$, calling*
+
+\begin{aligned}
+(\widehat\tau, \widehat{C}, s, \nu) &= \mathcal{A}.\texttt{fit\_predict\_fun}(X, Y, T, X_{\text{new}}, \alpha, \text{seed}),\\
+(\widehat\tau', \widehat{C}') &= \mathcal{A}.\texttt{predict\_fun}(s, X_{\text{new}}, \alpha),
+\end{aligned}
+
+*yields $\widehat\tau' = \widehat\tau$ and $\widehat{C}' = \widehat{C}$
+modulo numerical noise of the same order as the floating-point
+arithmetic of the language wrappers (R for `grf`, Python via
+`reticulate` for EconML).*
+
+The "modulo numerical noise" qualifier is non-trivial in the
+EconML case because `reticulate::r_to_py(...)` may copy or
+re-allocate numpy arrays; the noise is bounded by IEEE 754 rounding
+in single-pass conversions and we do not claim bit-exact
+equality across language boundaries. The reference adapters
+satisfy Theorem 3.1 by construction: `predict_fun` re-uses the
+same fitted forest / EconML estimator that `fit_predict_fun`
+returned in $s$.
+
+Adapters that do not expose `predict_fun` are still valid; the
+comparator's `predict()` method then performs a *full refit* on
+the original training data and emits a structured
+`gdpar_diagnostic_warning`. The fallback is honest about its cost:
+it does not pretend to reuse cached state.
+
+---
+
+# **4. Identification under cross-method comparison**
+
+The bridge identifies $\tau(x)$ on the AMM side under the
+assumptions of `v08b` §4: conditional ignorability per arm, overlap,
+SUTVA, and the residual no-confounding-given-AMM-design.
+
+Each external meta-learner identifies $\tau(x)$ under its own
+identification assumptions. For the two reference adapters:
+
+- `grf::causal_forest` identifies $\tau(x)$ under conditional
+  ignorability and the regularity conditions of Athey, Tibshirani,
+  Wager (2019, §2). It does *not* require a parametric model for
+  the outcome surfaces; the AMM-side model is *implicit* in the
+  splitting rule of the forest.
+- `econml.dml.CausalForestDML` identifies $\tau(x)$ under the
+  Neyman orthogonality of Chernozhukov et al. (2018, §1.3) and the
+  cross-fitting protocol; it factors the bias-variance trade-off
+  via two nuisance-function fits (for $\mathbb{E}[Y \mid X]$ and
+  $\mathbb{E}[T \mid X]$) before estimating the heterogeneous
+  effect.
+
+These three identification routes coincide *at the population
+level* under conditional ignorability: each
+$\widehat\tau_{\text{method}}$ converges (in its own asymptotic
+regime) to the same $\tau(x)$. Differences in finite samples are
+not pathologies; they are the joint footprint of (i) the
+identification route's bias-variance trade-off, (ii) the
+estimator's finite-sample behaviour, (iii) the regularization
+imposed by each method.
+
+What the comparator *does not* assume:
+
+- The comparator does **not** require that the inferential
+  origins of the CIs match. The bridge reports a posterior
+  credible interval; `grf` reports a frequentist asymptotic
+  Gaussian CI; EconML reports a bootstrap or asymptotic CI
+  depending on the estimator. Pooling them is conceptually
+  unsound and the comparator does not do it (see §5).
+- The comparator does **not** claim algorithmic equivalence
+  across methods. Two methods producing similar
+  $\widehat\tau_{\text{method}}$ over the evaluation grid is
+  *evidence of consistency in the chosen direction* but not a
+  certificate that the methods compute the same quantity in
+  every regime.
+- The comparator does **not** verify identification assumptions
+  per method. Conditional ignorability is the responsibility of
+  the study design; the comparator is descriptive.
+
+---
+
+# **5. Concordance criterion**
+
+Let $m$ be the number of methods compared (always $1 + \text{length(methods)}$,
+counting the bridge as method 0). Let
+$\widehat\tau_k = (\widehat\tau_k(x_i^{\text{new}}))_{i = 1}^{n_{\text{new}}}$
+denote the per-observation point estimate of method $k$. For every
+ordered pair $(k, l)$ the comparator reports three scalar metrics:
+
+\begin{aligned}
+\text{RMSE}_{k,l} &= \sqrt{\frac{1}{n_{\text{new}}}\sum_{i = 1}^{n_{\text{new}}} (\widehat\tau_k(x_i^{\text{new}}) - \widehat\tau_l(x_i^{\text{new}}))^2},\\
+\text{Pearson}_{k,l} &= \frac{\sum_{i} (\widehat\tau_k(x_i^{\text{new}}) - \bar\tau_k)(\widehat\tau_l(x_i^{\text{new}}) - \bar\tau_l)}{\sqrt{\sum_{i} (\widehat\tau_k(x_i^{\text{new}}) - \bar\tau_k)^2 \sum_{i}(\widehat\tau_l(x_i^{\text{new}}) - \bar\tau_l)^2}},\\
+\text{MAD}_{k,l} &= \frac{1}{n_{\text{new}}}\sum_{i = 1}^{n_{\text{new}}} \big|\widehat\tau_k(x_i^{\text{new}}) - \widehat\tau_l(x_i^{\text{new}})\big|.
+\end{aligned}
+
+with $\bar\tau_k = (1 / n_{\text{new}})\sum_i \widehat\tau_k(x_i^{\text{new}})$.
+
+These metrics are computed **exclusively on `cate_mean`**. The
+native CIs $\widehat{C}_k$ are reported per method but never
+aggregated across methods, for the inferential-origin reasons of
+§4.
+
+**Property 5.1 (Symmetry).** The matrices `RMSE`, `MAD`, and
+`Pearson` are symmetric. The diagonal of `RMSE` and `MAD` is
+identically zero; the diagonal of `Pearson` is identically 1 (by
+convention; the standard Pearson formula is undefined on
+zero-variance inputs, and the diagonal entries reflect the
+trivial self-correlation).
+
+**Property 5.2 (Triangle inequality for `RMSE` and `MAD`).** As
+both quantities are $L^2$ and $L^1$ norms over a discrete
+probability measure, they satisfy the triangle inequality:
+$\text{RMSE}_{k,l} \le \text{RMSE}_{k,j} + \text{RMSE}_{j,l}$ and
+similarly for `MAD`. Pearson, by contrast, is *not* a metric.
+
+**Property 5.3 (Invariance).** `Pearson` is invariant under
+affine transformations of each $\widehat\tau_k$ (translation +
+positive rescaling). `RMSE` and `MAD` are not. This is the
+algebraic reason behind the operational guidance of `vop06` §5:
+high Pearson with high RMSE means agreement in shape but not in
+level.
+
+We do **not** define a Mahalanobis-style metric across methods.
+Such a metric would require pooling per-method posterior or
+asymptotic covariances, which we explicitly avoid.
+
+---
+
+# **6. Identifiability per arm under the bridge**
+
+The bridge requires the structural compatibility checks listed in
+`v08b` §3 (matching family, link, AMM level, modulating basis
+type, anchor, covariate column structure of every AMM component,
+and absence of the hierarchical regime). Once the bridge is built,
+those checks have already passed and the comparator does not
+re-run them.
+
+The external adapters, on the other hand, do not see the AMM
+spec or the anchor. They consume the stacked dataset and produce
+$\widehat\tau_{\text{ext}}$ without inspecting any AMM-specific
+identifiability machinery. In particular:
+
+- (C7) anti-aliasing of Block 6.5 is not invoked because the
+  bridge has already excluded hierarchical fits (see `v08b` §7).
+- The basis-restricted identifiability check of `v01` does not
+  apply to the external adapters; the external methods use their
+  own regularization to ensure well-posedness (the trees of
+  `grf`'s causal forest, the cross-fitting of EconML).
+
+This is a *structural feature of the comparison*, not a defect.
+The exercise is to measure how the AMM-side T-learner agrees
+with methods of different inferential origin, *with each method
+identified under its own canonical assumptions.* Forcing the
+external adapters to verify AMM-specific identifiability would
+constitute the imposition of an AMM bias on the comparator.
+
+---
+
+# **7. Limits of the comparison**
+
+The comparator is descriptive, not inferential. Three concrete
+limits worth stating:
+
+**(i) No claim of algorithmic equivalence.** A small RMSE between
+two methods is evidence that they agree on the shape and the
+level of $\widehat\tau$ on the evaluation grid; it is not a
+certificate that they compute the same quantity, asymptotically
+or even in another finite sample. The comparator is silent on the
+mechanism of agreement.
+
+**(ii) No pooling of CIs.** The native CIs of each method live on
+their own inferential plane: posterior credible (bridge),
+asymptotic Gaussian under honesty (`grf`), Neyman-orthogonal CI
+(EconML). They are reported per method and never aggregated
+across methods. A user wanting an overall uncertainty envelope
+should pick one method as the canonical inferential source.
+
+**(iii) Sensitivity to the evaluation grid.** Both `RMSE` and
+`MAD` depend on the choice of $\mathcal{N}$. A grid that
+oversamples a region where two methods disagree will inflate the
+discrepancy; a grid that focuses on the "boring" mid-region will
+deflate it. The grid is the user's responsibility; we recommend
+the same grid used for the bridge's posterior summaries (the
+default `newdata` of `gdpar_compare_meta_learners` reuses
+`bridge$newdata`).
+
+A fourth limit, conceptually distinct, is inherited from `v08b`
+§9: the *T-learner itself* is known to suffer from
+regularization-induced bias under unbalanced samples (Kuenzel et
+al. 2019, §3.4). That bias travels from the bridge into the
+comparator unchanged; the comparator can detect it (as
+disagreement with an X-learner or with DR-style methods) but
+does not correct it. S-learner, X-learner, and DR-style adapters
+AMM-side are queued for Block 9 (`v08b` §10 (O4-CATE), (O5-CATE)).
+
+---
+
+# **8. Minimum reproducible example (CRAN-valid, R-only)**
+
+The example below runs only when `grf` is installed and the
+package's Bayesian path (Path 1, `cmdstanr`) is operative. It
+uses synthetic data to keep the chunk fast (~5--10 seconds with
+`num_trees = 500L`).
+
+```{r mre, eval = FALSE}
+library(gdpar)
+if (requireNamespace("grf", quietly = TRUE) &&
+    requireNamespace("cmdstanr", quietly = TRUE)) {
+
+  set.seed(2026L)
+  n <- 300L
+  df <- data.frame(x1 = rnorm(2L * n))
+  df$arm <- rep(c("treat", "ctrl"), each = n)
+  df$y <- with(df, ifelse(arm == "treat", 0.5, 0) +
+                   0.8 * x1 +
+                   rnorm(2L * n, sd = 0.5))
+  df_t <- subset(df, arm == "treat"); df_t$arm <- NULL
+  df_c <- subset(df, arm == "ctrl");  df_c$arm <- NULL
+
+  fit_t <- gdpar(y ~ x1, amm = amm_spec(a = ~ x1), data = df_t,
+                 iter_warmup = 300, iter_sampling = 300, chains = 2)
+  fit_c <- gdpar(y ~ x1, amm = amm_spec(a = ~ x1), data = df_c,
+                 iter_warmup = 300, iter_sampling = 300, chains = 2)
+  newdata <- data.frame(x1 = seq(-2, 2, length.out = 21L))
+  bridge <- gdpar_causal_bridge(fit_t, fit_c, newdata = newdata)
+
+  cmp <- gdpar_compare_meta_learners(
+    bridge,
+    methods = list(grf = gdpar_adapter_grf(num_trees = 500L,
+                                            seed = 2026L))
+  )
+  print(cmp)
+  summary(cmp)
+}
+```
+
+The Python-side equivalent is in
+`vignette("vop06_meta_learner_comparison")` §4 with `eval = FALSE`
+chunks (the example cannot be CRAN-valid because it requires a
+working Python environment with `econml`).
+
+---
+
+# **9. Open questions (O\*-CMP)**
+
+Each is anchored to a specific Block 9 sub-phase or to an
+ecosystem decision that exceeds the scope of 8.5.B.
+
+> **(O1-CMP) S-learner and X-learner AMM-side as comparators.**
+> Both S- and X-learner are queued AMM-side as
+> `gdpar_causal_s_learner` and `gdpar_causal_x_learner` in
+> Block 9 (`v08b` §10 (O4-CATE)). Once implemented, both will
+> become adapters in this comparator (a separate sub-phase, not
+> 8.5.B).
+
+> **(O2-CMP) Doubly-robust and DML AMM-side.** DR and DML add a
+> propensity-score model that the T-learner avoids. The AMM-side
+> versions are queued as (O5-CATE) of `v08b`. Block 9 will
+> deliver them along with their adapter wrappers.
+
+> **(O3-CMP) Overlap diagnostics integrated with the
+> comparator.** A canonical overlap plot per arm
+> (propensity-score density, Hosmer-Lemeshow per stratum, ECDF
+> comparison) would belong here. Queued for Block 9 together
+> with the bridge diagnostic battery (`v08b` §10 (O6-CATE)).
+
+> **(O4-CMP) Heterogeneous CI calibration.** Quantifying the
+> coverage of each method's native CI on synthetic ground-truth
+> CATEs is the most demanding way to compare methods. The
+> infrastructure is out of scope of 8.5.B (it requires a
+> simulator and a coverage-counting orchestrator); it would be a
+> dedicated sub-phase.
+
+> **(O5-CMP) Cross-validation across overlap and effect-size
+> regimes.** An adversarial battery (poor overlap, weak effect,
+> heteroskedasticity, non-linear interactions) would stress-test
+> the four canonical regimes of the comparator. Queued for the
+> Block 9 release battery alongside the eBird re-validation of
+> Block 9.
+
+---
+
+# **Appendix A. Notational correspondence with the meta-learner literature**
+
+| Concept | This vignette | Kuenzel et al. (2019) | Athey-Wager (2019) | Chernozhukov et al. (2018) |
+|:--|:--|:--|:--|:--|
+| Treatment indicator | $T \in \{0,1\}$ | $W \in \{0,1\}$ | $W \in \{0,1\}$ | $D \in \{0,1\}$ |
+| Covariates | $X \in \mathcal{X}$ | $X$ | $X$ | $X$ |
+| Outcome | $Y$ | $Y$ | $Y$ | $Y$ |
+| Potential outcome | $Y^{(t)}$ | $Y(w)$ | $Y(w)$ | $Y(d)$ |
+| CATE | $\tau(x)$ | $\tau(x)$ | $\tau(x)$ | $\theta_0(x)$ (heterogeneous case) |
+| Bridge T-learner estimate | $\widehat\tau_{\text{bridge}}(x)$ | $\widehat\tau_T(x)$ | (n/a; uses causal forest) | (n/a; uses DML) |
+| External T-learner estimate | $\widehat\tau_{\text{ext}}(x)$ | $\widehat\tau_T$ with their own $M_w$ | $\widehat\tau_{CF}(x)$ | $\widehat\theta(x)$ via DML |
+| Identification assumption | conditional ignorability + overlap + SUTVA | same | same + honesty | same + Neyman orthogonality |
+| Nuisance functions | implicit in per-arm AMM | implicit in $M_w$ | implicit in CF splits | explicit ($e(X)$, $g(X)$) with cross-fitting |
+| CI source | posterior credible | bootstrap or asymptotic on $M_w$ | asymptotic Gaussian under honesty | Neyman-orthogonal CI on $\theta$ |
+
+The correspondence is structural rather than numerical: when the
+per-arm base learners coincide and the assumptions match, the
+estimates agree at the population level; the finite-sample
+discrepancy is what the comparator measures.
+
+---
+
+# **Appendix B. Implementation notes for additional adapters**
+
+The contract of an adapter is documented in detail in
+`?gdpar_meta_learner_adapter`; the operational walkthrough lives in
+`vignette("vop06_meta_learner_comparison")` §6. This appendix
+records the *theoretical* obligations of a well-formed adapter.
+
+**B.1. Signature obligation.** `fit_predict_fun` must accept the
+arguments in the exact order `(X, Y, T, X_newdata, level, seed_run)`.
+The comparator passes data frames `X` and `X_newdata`; the adapter
+is responsible for any conversion to numeric matrices or to
+language-native arrays (e.g. numpy via `reticulate::r_to_py`).
+
+**B.2. Output obligation.** `fit_predict_fun` must return a list
+with components `cate_mean` (numeric vector of length
+$n_{\text{new}}$), `cate_ci` (numeric matrix of dimensions
+$n_{\text{new}} \times 2$ with columns named `lower` and `upper`,
+or `NULL`), `state` (opaque object cached for the optional
+`predict_fun`, or `NULL`), and `notes` (character vector of
+free-form diagnostics).
+
+**B.3. CI obligation.** If `native_ci = TRUE` was declared at
+adapter-construction time, `cate_ci` must be non-`NULL` on every
+successful run. The comparator does not synthesize a CI when the
+adapter declares `native_ci = TRUE` and returns `NULL`; this is
+detected at validation time and the comparator aborts with
+`gdpar_internal_error`.
+
+**B.4. Determinism obligation (when `predict_fun` is provided).**
+If `predict_fun` is non-`NULL`, the adapter must guarantee that
+`predict_fun(state, X_newdata, level)` reuses the cached fit
+deterministically (Theorem 3.1). Refits inside `predict_fun` are
+disallowed; if the method does not expose cheap re-prediction,
+pass `predict_fun = NULL` and accept the fallback refit.
+
+**B.5. Serialization obligation.** The `state` slot should
+ideally survive `saveRDS` round-trip. If it cannot (e.g. because
+it references a Python object via `reticulate`), the adapter's
+`predict_fun` should detect the broken reference and abort with
+`gdpar_unsupported_feature_error` (the EconML reference adapter
+follows this pattern).
+
+**B.6. Side-effect prohibition.** Adapters must not install
+packages, write files, modify the global environment, or perform
+network I/O. Resource handling (worker pools, Python sub-
+processes) is the adapter's responsibility but must be transparent
+to the comparator.
+
+**B.7. Categorical covariates.** Adapters are responsible for
+handling factor / character covariates. The reference adapters
+apply `model.matrix(~ . - 1, data = X)` after coercing characters
+to factors, and they remember the factor levels in `state$template`
+so re-prediction on a fresh grid aligns with the training design.
+
+---
+
+# **References cited in this addendum**
+
+- **Athey, S., Tibshirani, J., and Wager, S.** (2019). Generalized
+  random forests. *The Annals of Statistics*, 47(2), 1148-1178.
+- **Athey, S., and Wager, S.** (2019). Estimating treatment effects
+  with causal forests: An application. *Observational Studies*, 5,
+  37-51.
+- **Chernozhukov, V., Chetverikov, D., Demirer, M., Duflo, E., Hansen,
+  C., Newey, W., and Robins, J.** (2018). Double/debiased machine
+  learning for treatment and structural parameters. *The
+  Econometrics Journal*, 21(1), C1-C68.
+- **Kuenzel, S. R., Sekhon, J. S., Bickel, P. J., and Yu, B.** (2019).
+  Metalearners for estimating heterogeneous treatment effects using
+  machine learning. *Proceedings of the National Academy of
+  Sciences*, 116(10), 4156-4165.
+- **Rubin, D. B.** (1974). Estimating causal effects of treatments
+  in randomized and non-randomized studies. *Journal of
+  Educational Psychology*, 66(5), 688-701.
+- **Wager, S., and Athey, S.** (2018). Estimation and inference of
+  heterogeneous treatment effects using random forests. *Journal
+  of the American Statistical Association*, 113(523), 1228-1242.
+
+---
+
+*End of Theoretical Addendum -- Block 8.5.B.*

@@ -1,0 +1,390 @@
+---
+title: "**Theoretical Addendum -- Block 3:**"
+subtitle: "Standard Predictive Models as Formal Special Cases of the AMM"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{Standard Predictive Models as Formal Special Cases of the AMM}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+---
+
+# **1. Purpose**
+
+Block 1 introduced the AMM hierarchy (Levels 0 through $\infty$) and stated identifiability for the canonical Level-2 form via Theorem 1A. Block 1 §8 outlined a list of standard predictive models that fall within this framework as restrictions of AMM, but the discussion was schematic: each model was named, its AMM restriction stated, and identifiability flagged as a corollary.
+
+This block converts those informal correspondences into **formal subsumption results**, one per standard model. Each result is a theorem with the following structure:
+
+1. The standard model is stated formally with all its assumptions.
+2. The AMM Level and the specific restriction of $(\mathcal{F}_a, \mathcal{F}_b, \mathcal{F}_W)$ are identified.
+3. The hypotheses (LIN), (C1)-(C6), (EVAL), (D-ID), and (where relevant) (REG-EST) of the previous blocks are **explicitly verified** for the model in question.
+4. The conclusion is drawn that Theorem 1A's identifiability ---or, for models outside the linear-class scope, Proposition 1F's function-level treatment--- applies.
+
+The result is a verifiable map from the standard literature into the framework. **No claim is made that the framework is the only formulation under which these models can be analyzed**; the claim is the strictly weaker but defensible one that **each standard model is a formal restriction of the canonical AMM**, with identifiability inheriting from the framework's general theorems under explicit and minimal additional assumptions.
+
+The treatment is organized model by model. Each subsumption proof is short ---usually just the verification of (LIN) and the basis structure--- but the explicit verification matters: it is what converts "the framework subsumes X" from a claim into a theorem.
+
+---
+
+# **2. Setting and Notation**
+
+We retain the notation of Blocks 1 and 2:
+
+- $X \in \mathcal{X} \subseteq \mathbb{R}^d$: covariates.
+- $\theta_i \in \mathbb{R}^p$: individual parameter vector.
+- $Y_i \in \mathcal{Y}$: response, with $Y_i \mid \theta_i \sim \mathcal{D}(\theta_i)$.
+- $\theta_{\text{ref}} \in \Theta$: population reference.
+- $\Delta(x, \theta_{\text{ref}}) = a(x) + b(x) \odot \theta_{\text{ref}} + W(\theta_{\text{ref}}) x$: AMM canonical form.
+
+Each model below is presented in its standard literature notation, then recast in AMM terms. The map is unique up to the centering and anchoring conventions of Blocks 1-2.
+
+## **2.1. Reminder of (D-ID) and its concrete verification**
+
+(D-ID), introduced in Lemma 1B of Block 1, requires that the parameter-to-distribution map
+$$\theta \;\longmapsto\; \mathcal{D}(\theta)$$
+be **injective** as a function from $\Theta \subseteq \mathbb{R}^p$ to the space of probability distributions on $\mathcal{Y}$. This is a hypothesis on the response distribution family chosen by the modeller, not a theorem of the framework. We collect here the concrete verification status of (D-ID) for the response families that appear repeatedly in the special cases below; each theorem will refer back to this list rather than assert (D-ID) as "standard".
+
+- **Gaussian with known variance**, $\mathcal{D}(\theta) = \mathcal{N}(\theta, \sigma^2 I)$: injective directly from injectivity of the mean map. **Holds.**
+- **Gaussian with unknown variance**, $\mathcal{D}(\theta, \sigma^2) = \mathcal{N}(\theta, \sigma^2 I)$: injective in $(\theta, \sigma^2)$ jointly when $\sigma^2 > 0$. **Holds** under positivity.
+- **Generalized linear models with canonical link**: $\mathcal{D}(\theta)$ has natural parameter $\theta$, and the canonical-link family is identifiable iff the link is **invertible** and the design matrix has full column rank. **Holds** under these two standard conditions.
+- **GLM with non-canonical link**: identifiability requires injectivity of the (non-canonical) link function and the same full-rank design condition. **Holds case-by-case** depending on the chosen link.
+- **Zero-inflated count distributions** (ZIP, ZINB): identifiable when both the structural-zero probability $\pi$ and the count parameter $\theta$ vary observably (Lambert 1992; Greene 1994). **Holds** under standard regularity; may fail at boundary cases such as $\pi = 1$.
+- **Multivariate response with copula**: identifiable when marginals and copula family are jointly identifiable; sufficient conditions in Patton (2006). **Holds case-by-case.**
+
+In each theorem of Sections 3-9, the (D-ID) verification consists of citing the relevant case from this list, and noting any model-specific design conditions that arise.
+
+---
+
+# **3. Theorem 3.1: Standard Linear Regression**
+
+> **Standard model.** $Y_i = X_i^\top \beta + \varepsilon_i$, with $\beta \in \mathbb{R}^p$ a constant parameter for all $i$, $\varepsilon_i$ i.i.d. from a known distribution $\mathcal{D}_\varepsilon$ with $\mathbb{E}[\varepsilon_i] = 0$ and finite variance.
+
+**AMM identification.** Set $\theta_i = \beta$ for all $i$. The deviation function is identically zero: $\Delta(x_i, \theta_{\text{ref}}) = 0$. The AMM Level is **0** (degenerate).
+
+**Restriction of function classes.** $\mathcal{F}_a = \{0\}$, $\mathcal{F}_b = \{0\}$, $\mathcal{F}_W = \{0\}$.
+
+**Hypothesis verification.**
+
+- **(LIN):** The trivial subspace $\{0\}$ is a finite-dimensional linear subspace (dimension zero). $\checkmark$
+- **(C1)-(C5):** All centering and anchoring conditions are vacuous when $a, b, W$ are zero. $\mathrm{Cov}(X)$ full rank is the standard regression assumption on the design. $\checkmark$
+- **(C6):** $\theta_* = \beta \in \Theta^\circ$, assumed; if any coordinate of $\beta$ is identically zero, that coordinate is dropped from the model and (C6) holds for the remaining coordinates. $\checkmark$
+- **Abstract FIC at $\theta_*$:** Vacuous. The only equation is $\delta_W \cdot x = 0$ for $x \in \mathrm{supp}(\mu)$; under (C5) it forces $\delta_W = 0$, but here $\delta_W \in \{0\}$ trivially. $\checkmark$
+- **(D-ID):** §2.1, Gaussian with known variance: injective in $\theta$ via the mean map. For other response families used in regression contexts (Poisson, Binomial, etc.), §2.1 (canonical-link GLM) applies under invertible link plus full-rank design; the latter coincides with $\mathrm{Cov}(X)$ full rank in (C5). $\checkmark$
+
+> **Theorem 3.1.** Standard linear regression is the AMM Level-0 special case. Under (D-ID), Theorem 1A applies trivially: $\theta_* = \beta$ is identified from data as the solution to the OLS normal equations.
+
+*Proof.* Direct from the verifications above. The AMM Level-0 framework reduces exactly to the standard regression model, and identifiability of $\beta$ is the standard result. $\square$
+
+---
+
+# **4. Theorem 3.2: Hierarchical Linear Model with Covariates in Random Effects**
+
+> **Standard model (Raudenbush and Bryk 2002).** Group-level covariates $w_i$ and a fixed-effect mapping $\Gamma \in \mathbb{R}^{p \times q}$ produce individual parameters
+> $$\theta_i = \beta + \Gamma w_i,$$
+> with $\beta \in \mathbb{R}^p$ a global intercept and $w_i$ centered ($\mathbb{E}[w_i] = 0$). The response model is $Y_i \sim \mathcal{D}(\theta_i)$.
+
+**AMM identification.** Set $\theta_{\text{ref}} = \beta$. The deviation is $\Delta_i = \Gamma w_i$, a linear function of the centered covariate $w_i$. Identifying $w_i$ with the AMM covariate $x_i$, we have:
+$$\theta_i = \theta_{\text{ref}} + a(x_i), \qquad a(x_i) = \Gamma x_i.$$
+
+The AMM Level is **1** (linear additive).
+
+**Restriction of function classes.** $\mathcal{F}_a = \{x \mapsto Ax : A \in \mathbb{R}^{p \times d}\}$ (the space of linear maps), $\mathcal{F}_b = \{0\}$, $\mathcal{F}_W = \{0\}$.
+
+**Hypothesis verification.**
+
+- **(LIN):** $\mathcal{F}_a$ is the linear space of $p \times d$ matrices, of dimension $pd$. $\mathcal{F}_b$ and $\mathcal{F}_W$ are trivial. $\checkmark$
+- **(C1):** $\mathbb{E}[X] = 0$ holds by the centering assumption on $w_i$. $\checkmark$
+- **(C2):** $\mathbb{E}[a(X)] = \Gamma \cdot \mathbb{E}[X] = 0$. $\checkmark$
+- **(C3), (C4):** Vacuous since $b, W$ are zero. $\checkmark$
+- **(C5):** $\mathrm{Cov}(X)$ full rank is the standard regression assumption on the design at the group level. $\checkmark$
+- **(C6):** $\theta_* = \beta \in \Theta^\circ$, assumed. $\checkmark$
+- **Abstract FIC at $\theta_*$:** Reduces to "$\delta_a \in \mathcal{F}_a$ with $\delta_a(x) = 0$ for $x \in \mathrm{supp}(\mu)$ implies $\delta_a = 0$". This is the linear independence of the columns of the centered design matrix, equivalent to non-singularity of $\mathrm{Cov}(X)$ ((C5)). $\checkmark$
+- **(D-ID):** §2.1 applies according to the response family chosen for the model (Gaussian: trivial; canonical-link GLM: invertible link + full-rank design, the latter coinciding with (C5)). $\checkmark$
+
+> **Theorem 3.2.** The hierarchical linear model with covariates in random effects is the AMM Level-1 special case with linear additive component. Under (D-ID) for the chosen response family and (C5), Theorem 1A applies and identifies $(\theta_{\text{ref}}, \Gamma)$.
+
+*Proof.* From the verifications above. The fixed-effect matrix $\Gamma$ is identified as the unique matrix realizing $a(x) = \Gamma x$ in $\mathcal{F}_a$, by the FIC-driven uniqueness of the additive component in Theorem 1A. $\square$
+
+## **4.1. Per-group anchor as random intercept (Block 6.5)**
+
+The classical random-intercept model
+$$\theta_i = \beta_{g_i} + \Gamma w_i, \qquad \beta_g \overset{\text{i.i.d.}}{\sim} \mathcal{N}(\mu_\beta, \sigma_\beta^2)$$
+where $g_i \in \{1, \ldots, J\}$ assigns observation $i$ to one of $J$ groups, is the AMM special case obtained by activating the `group` argument of `gdpar()`. Under grouping, $\theta_{\text{ref}}$ is promoted from a scalar (Block 6) to a vector $\theta_{\text{ref}}[g]$, $g = 1, \ldots, J_{\text{groups}}$, sampled hierarchically from $\mathrm{Normal}(\mu_{\theta_{\text{ref}}}, \sigma_{\theta_{\text{ref}}})$ with both hyperparameters estimated. The user-facing canonization is:
+
+$$\theta_i = \theta_{\text{ref}}[g_i] + a(x_i), \qquad \theta_{\text{ref}}[g] \sim \mathrm{Normal}(\mu_{\theta_{\text{ref}}}, \sigma_{\theta_{\text{ref}}}).$$
+
+Identification of $\Gamma$ inherits Theorem 3.2 directly; identification of the per-group anchors $\theta_{\text{ref}}[g]$ requires condition (C7) of Block 6.5 Section 6.6.2 (anti-aliasing of `a` and `b` with the group indicator), enforced pre-fit by `gdpar()`. The default `group = NULL` reduces bit-exactly to the scalar Block 6 semantics. Example:
+
+```{r per_group_anchor_example, eval=FALSE}
+spec <- amm_spec(a = ~ x1 + x2)  # no factor(group): C7 ok
+fit  <- gdpar(y ~ x1 + x2, amm = spec, data = df, group = ~ school)
+coef(fit)$mu_theta_ref          # population-level mu
+coef(fit)$sigma_theta_ref       # population-level sigma
+coef(fit)$theta_ref             # per-school anchors (g, k, mean, q05, q50, q95)
+predict(fit, newdata = new_df)  # known schools: posterior; new school: prior predictive marginal
+```
+
+---
+
+# **5. Theorem 3.3: Random-Coefficient Model**
+
+> **Standard model.** Each individual has its own coefficient vector,
+> $$\theta_i = \beta + \nu_i, \qquad \nu_i \overset{\text{i.i.d.}}{\sim} \mathcal{N}(0, \Sigma_\nu).$$
+> The response is $Y_i = X_i^\top \theta_i + \varepsilon_i$.
+
+**AMM identification.** This model is **conceptually distinct** from Theorem 3.2 because $\nu_i$ is genuinely random per individual rather than a deterministic function of $w_i$. To recast in the AMM, treat $\nu_i$ as a latent covariate $u_i$ (unobserved). Then with $x_i = (X_i, u_i)$:
+$$\theta_i = \theta_{\text{ref}} + a(u_i), \qquad a(u_i) = u_i,$$
+with $\theta_{\text{ref}} = \beta$. **AMM Level: 1** (latent additive).
+
+**Caveat on identifiability.** Since $u_i$ is latent (not observed), $\theta_i$ is itself unobserved. The framework's identifiability theorems (Theorems 1A, 1E) require $\theta_i$ to be a deterministic function of observed covariates. Random-coefficient models therefore fall **outside** the scope of Theorem 1A in their standard formulation.
+
+**Recovery of identifiability via marginalization.** Marginalizing over $\nu_i$ yields
+$$Y_i = X_i^\top \beta + (X_i^\top \nu_i + \varepsilon_i),$$
+with the bracketed term a heteroscedastic error of conditional variance $X_i^\top \Sigma_\nu X_i + \sigma_\varepsilon^2$. The marginal model has parameter $(\beta, \Sigma_\nu)$. Identifiability requires:
+
+(R1) **First-moment identifiability of $\beta$.** $\mathrm{Cov}(X)$ has full rank ((C5)). Sufficient for $\beta$.
+
+(R2) **Second-moment identifiability of $\Sigma_\nu$.** The design matrix $X$ exhibits sufficient variability so that the conditional variance $X_i^\top \Sigma_\nu X_i$ is **not observationally equivalent** to a scalar variance term. Concretely, the family of quadratic forms $\{x^\top \Sigma_\nu x : x \in \mathrm{supp}(\mu)\}$ as a function of $x$ must be informative about all entries of $\Sigma_\nu$. A sufficient condition is that the design includes covariate vectors $x$ spanning $\mathbb{R}^d$ generically: for each pair of indices $(j, k)$, there is observable variation in $x_j x_k$ across the sample. Under (R2), the marginal log-likelihood is identifiable in $\Sigma_\nu$.
+
+(R3) **Separation of fixed and random effects.** $X_i$ exhibits sufficient within-group variation when the model is multilevel, so that random-effect variability cannot be absorbed into fixed-effect heterogeneity. (Demidenko 2013, Ch. 2 for the precise mixed-effect identifiability theorem.)
+
+(R4) (D-ID) for the marginal response family ($\mathcal{N}(X_i^\top \beta, X_i^\top \Sigma_\nu X_i + \sigma_\varepsilon^2)$ for Gaussian errors): the parameter $(\beta, \Sigma_\nu, \sigma_\varepsilon^2)$ is injective into the marginal distribution under (R1)+(R2)+(R3).
+
+> **Theorem 3.3.** The random-coefficient model is **not** a direct AMM Level-1 instance because individual parameters depend on a latent (unobserved) variable. The framework subsumes the **marginal** version of the model, where $\beta$ is identified as $\theta_{\text{ref}}$ and the random-effect covariance $\Sigma_\nu$ is absorbed into the response distribution as heteroscedastic noise structure. The marginal subsumption admits identifiability of $(\beta, \Sigma_\nu)$ under the explicit conditions (R1)-(R4) above.
+
+*Proof.* Marginalization yields the marginal likelihood $L(\beta, \Sigma_\nu \mid X, Y)$. (R1) gives $\beta$. (R2) and (R3) give $\Sigma_\nu$ via the conditional-variance structure. (R4) gives joint identifiability of all parameters. The marginal $\beta$ corresponds to AMM $\theta_{\text{ref}}$; the variance structure is handled as part of $\mathcal{D}(\theta_{\text{ref}})$ rather than as a parameter of the deviation function. $\square$
+
+**Limitation flagged.** (R2) is non-trivial: in samples with low covariate variability or near-collinear $X$, $\Sigma_\nu$ can be only partially identified. The framework's library, when applied to a random-coefficient model via the marginal parameterization, runs an empirical rank check on the second-moment design matrix and reports the identifiable subset of $\Sigma_\nu$ when the full identifiability fails.
+
+---
+
+# **6. Theorem 3.4: Hastie-Tibshirani Varying-Coefficient Model**
+
+> **Standard model (Hastie and Tibshirani 1993).** $Y_i = X_i^\top \beta(z_i) + \varepsilon_i$, with $\beta : \mathbb{R}^q \to \mathbb{R}^p$ smooth and $z_i$ a "modifier covariate".
+
+**AMM identification.** The individual parameter is $\theta_i = \beta(z_i)$. Define the population reference as the value of $\beta$ at the population-mean modifier:
+$$\theta_{\text{ref}} \;=\; \beta(\bar z), \qquad \bar z = \mathbb{E}[z_i].$$
+
+The deviation is then
+$$\Delta_i = \beta(z_i) - \beta(\bar z),$$
+
+a smooth function of $z_i - \bar z$ that does **not** depend on $\theta_{\text{ref}}$. Identifying $z_i - \bar z$ with the centered AMM covariate $x_i$ and $a(x_i) = \beta(\bar z + x_i) - \beta(\bar z)$, we have:
+$$\theta_i = \theta_{\text{ref}} + a(x_i), \qquad b \equiv 0, \quad W \equiv 0.$$
+
+The AMM Level is **1** (additive only); the reference does not enter the deviation as a structural argument in the standard Hastie-Tibshirani formulation.
+
+**Restriction of function classes.** $\mathcal{F}_a$ = the chosen finite-dimensional spline / kernel space approximating smooth $\beta$, with bases excluding constants (centered). $\mathcal{F}_b = \mathcal{F}_W = \{0\}$.
+
+**Hypothesis verification.**
+
+- **(LIN):** Standard B-spline or natural-cubic-spline bases with $K$ knots span a finite-dimensional linear subspace of dimension $K$ (or $K + d$ for tensor-product bases). $\mathcal{F}_a$ is therefore a finite-dim linear subspace closed under addition. $\checkmark$
+- **(C1):** $\mathbb{E}[x_i] = \mathbb{E}[z_i - \bar z] = 0$. $\checkmark$
+- **(C2):** $\mathbb{E}[a(X)]$ vanishes when the spline basis excludes constants and the centering is enforced by column-wise centering of the spline design matrix $\mathbf{Z}_a$ (so that $\mathrm{colMeans}(\mathbf{Z}_a) = \mathbf{0}$ exactly). $\checkmark$
+- **(C3), (C4):** Vacuous since $b, W$ are zero. $\checkmark$
+- **(C5):** $\mathrm{Cov}(X)$ full rank is required for full identifiability of $\beta(\cdot)$ in the standard literature. $\checkmark$
+- **(C6):** $\theta_* = \beta(\bar z) \in \Theta^\circ$, assumed. $\checkmark$
+- **Abstract FIC at $\theta_*$:** Reduces to the linear independence of the spline basis evaluations on $\mathrm{supp}(\mu)$, equivalent to non-singularity of the spline Gram matrix. This is the standard non-collinearity condition of penalized spline fitting (Wood 2017). $\checkmark$
+- **(D-ID):** §2.1, applies according to the response family chosen for the model. For Gaussian errors with known variance, trivial. $\checkmark$
+
+> **Theorem 3.4.** The standard Hastie-Tibshirani VCM is the AMM Level-1 special case with $a$ chosen as a smooth function of the modifier covariate. Under (LIN) realized via a finite-dim spline basis $\mathcal{F}_a$, (D-ID), and standard regularity, Theorem 1A applies and identifies $\beta(\cdot)$ **within the chosen finite-dimensional function class** $\mathcal{F}_a$ ---equivalently, the $L^2(\mu)$-projection of the true $\beta(\cdot)$ onto $\mathcal{F}_a$ is identified.
+
+*Proof.* Direct from the verifications. The element of $\mathcal{F}_a$ realizing the projection of the true $\beta(\cdot) - \beta(\bar z)$ onto the spline space is identified by Theorem 1A; the corresponding $\beta(z) = \theta_{\text{ref}} + a(z - \bar z)$ is the in-class approximation of the true $\beta(\cdot)$. The full infinite-dimensional $\beta(\cdot)$ is identified **only as a sequence** of in-class approximations indexed by spline-class refinement (Block 5 treats the asymptotics of this approximation under refinement). $\square$
+
+**Scope clarification.** Theorem 3.4 does not claim identification of $\beta(\cdot)$ as an arbitrary smooth function in an infinite-dimensional space ---the framework's identifiability theorems all live in finite-dimensional linear classes by (LIN). What is identified is the projection $\Pi_{\mathcal{F}_a} \beta(\cdot)$ onto the chosen spline space. Convergence of this projection to the true $\beta(\cdot)$ as $\dim(\mathcal{F}_a) \to \infty$ is the subject of nonparametric consistency theory (Stone 1985; Wood 2017), distinct from identifiability inside a fixed class.
+
+**Connection to Block 5.** The asymptotic theory of $\beta(\cdot)$ under penalized spline fitting (Fan and Zhang 2008) is treated in Block 5 as a specialization of the framework's general consistency results to the VCM case.
+
+---
+
+# **7. Theorem 3.5: Reference-Modulated Varying-Coefficient Model**
+
+> **Extended model.** A modification of the VCM in which the coefficients depend on the population reference: $Y_i = X_i^\top \beta(z_i, \theta_{\text{ref}}) + \varepsilon_i$, with $\beta(\cdot, \theta_{\text{ref}})$ allowed to change shape as $\theta_{\text{ref}}$ varies.
+
+**AMM identification.** Define $\theta_{\text{ref}} = \beta(\bar z, \theta_{\text{ref}})$ self-consistently (a fixed-point definition that exists under continuity of $\beta$ in its second argument and standard contraction conditions). Identifying $z_i - \bar z$ with $x_i$ and decomposing:
+$$\theta_i = \beta(z_i, \theta_{\text{ref}}) = \theta_{\text{ref}} + a(x_i) + W(\theta_{\text{ref}}) x_i,$$
+where $a(x_i) = $ additive part of $\beta(\bar z + x, \theta_{\text{ref}}) - \theta_{\text{ref}}$ at fixed reference, and $W(\theta_{\text{ref}})$ captures the reference-modulated linear-in-$x$ part. **AMM Level: 2 with $b \equiv 0$.**
+
+**Restriction of function classes.** $\mathcal{F}_a$ = spline space (as in Theorem 3.4), $\mathcal{F}_b = \{0\}$, $\mathcal{F}_W$ = matrix-valued spline space in $\theta_{\text{ref}}$ vanishing at the anchor.
+
+**Hypothesis verification.**
+
+- **(LIN):** Both $\mathcal{F}_a$ and $\mathcal{F}_W$ are finite-dim linear spaces of splines. $\checkmark$
+- **(C1)-(C5):** As in Theorem 3.4, with the additional verification that $W(\theta_0) = 0$ at the anchor (enforced by basis choice). $\checkmark$
+- **(C6):** $\theta_* \in \Theta^\circ$, assumed. $\checkmark$
+- **Abstract FIC at $\theta_*$ via explicit orthogonality of function classes.** The decomposition $\theta_i = \theta_{\text{ref}} + a(x_i) + W(\theta_{\text{ref}}) x_i$ is **non-unique** without restrictions: if $\mathcal{F}_a$ contains the linear-in-$x$ subspace $\{Mx : M \in \mathbb{R}^{p \times d}\}$, mass can be moved between $a$ and $W(\theta_*) x$ at fixed $\theta_*$, defeating identifiability.
+
+  **Uniqueness is restored by an explicit orthogonal-class construction.** Choose $\mathcal{F}_a$ as a spline space whose basis is constructed to be **disjoint from the linear-in-$x$ subspace** in the precise sense:
+  $$\mathcal{F}_a \;\cap\; \{x \mapsto Mx : M \in \mathbb{R}^{p \times d}\} \;=\; \{0\}.$$
+  Equivalently, the span of the spline basis for $a$ contains no linear-in-$x$ functions. Standard B-spline and natural-cubic-spline bases admit such a construction by removing the linear basis function from the span (Wood 2017, §4.2 absorbs this into the reparametrization that produces the "centered" smooth term). At the implementation level, the orthogonality is enforced operationally as a projection: every spline term in $\mathcal{F}_a$ is replaced by its $L^2(\mu)$-residual after projection onto the linear-in-$x$ subspace, denoted $(\mathrm{Id} - \Pi_{\text{lin}}) \mathcal{F}_a$. The resulting class is the framework's $\mathcal{F}_a$ for VCM-Level-2 fits.
+
+  Under this orthogonal construction, $\mathcal{S}_a = \mathcal{F}_a$ and $\mathcal{S}_W = \{Mx : M \in \mathbb{R}^{p \times d}\}$ are linearly independent in $L^2(\mu, \mathbb{R}^p)$ by construction, hence Abstract FIC at $\theta_*$ holds. $\checkmark$
+
+- **(EVAL):** $\mathcal{F}_W$ contains spline functions vanishing at the anchor $\theta_0$ and taking arbitrary values at any $\theta_* \neq \theta_0$, so $E_{\theta_*}: \mathcal{F}_W \to \mathbb{R}^{p \times d}$ is surjective. $\checkmark$
+- **(D-ID):** §2.1, applies according to the response family chosen. For Gaussian errors, trivial. $\checkmark$
+
+> **Theorem 3.5.** The reference-modulated VCM is the AMM Level-2 special case with $b \equiv 0$. Under (LIN) realized via spline classes constructed orthogonal to the linear-in-$x$ subspace, (EVAL), and the standard regularity of penalized spline fitting, Theorem 1A identifies $(\theta_{\text{ref}}, a, W(\theta_*))$ within the chosen finite-dim function classes. Theorem 1E lifts this to identification of $W$ as an element of $C(\overline{\mathrm{supp}(\pi_\Theta)}, \mathbb{R}^{p \times d})$ under (BAY-1)-(BAY-3) and the same orthogonality construction.
+
+*Proof.* From the verifications, with the orthogonal-class construction making the FIC condition automatic by construction rather than as a generic assumption. The framework's distinguishing feature ($\Delta$ depending on $\theta_{\text{ref}}$) appears here as the modulated component $W(\theta_{\text{ref}}) x$, and the orthogonality between $\mathcal{F}_a$ and the linear-in-$x$ subspace is **necessary and sufficient** for unique decomposition under the chosen finite-dim representation. $\square$
+
+**Implementation note.** In practice, the orthogonality $\mathcal{F}_a \cap \{Mx\} = \{0\}$ is enforced numerically: at fit time, the linear-in-$x$ component is extracted from the spline term by $L^2(\mu)$-projection, the residual is the "orthogonalized" spline contribution, and $W(\theta_*)$ is fit on the linear-in-$x$ part separately. The library reports whether the orthogonalization step changed the spline span by more than a numerical tolerance, signalling whether the user's basis choice was already orthogonal or required projection.
+
+---
+
+# **8. Theorem 3.6: Hierarchical Bayesian with Multiplicative Interaction**
+
+> **Model.** Hierarchical Bayesian formulation in which the individual deviation has both additive and multiplicative-Hadamard structure, the latter scaling with the population reference:
+> $$\theta_i = \theta_{\text{ref}} + a(x_i) + b(x_i) \odot \theta_{\text{ref}}, \qquad \theta_{\text{ref}} \sim \pi_\Theta.$$
+
+**AMM identification.** Direct: $\Delta(x_i, \theta_{\text{ref}}) = a(x_i) + b(x_i) \odot \theta_{\text{ref}}$, $W \equiv 0$. **AMM Level: 2 with $W \equiv 0$.**
+
+**Restriction of function classes.** $\mathcal{F}_a, \mathcal{F}_b$ = finite-dim parametric spaces (e.g., polynomial, spline, or basis expansion of the analyst's choice), $\mathcal{F}_W = \{0\}$.
+
+**Hypothesis verification.**
+
+- **(LIN):** Standard finite-dim parametric spaces. $\checkmark$
+- **(C1)-(C5):** Centering of $a, b$ enforced by column-wise centering of $\mathbf{Z}_a, \mathbf{Z}_b$ in the AMM design constructor; (C4) vacuous since $W \equiv 0$. $\checkmark$
+- **(C6):** $\theta_* \in \Theta^\circ$. **Critical for this case**: a zero coordinate of $\theta_*$ destroys identifiability of $b$ in that coordinate, since the multiplicative term vanishes there regardless of $b_k$. $\checkmark$ (under explicit assumption).
+- **Abstract FIC at $\theta_*$:** The two component subspaces are $\mathcal{S}_a = \mathcal{F}_a$ and $\mathcal{S}_b(\theta_*) = \{h(x) \odot \theta_* : h \in \mathcal{F}_b\}$. Linear independence holds when the basis functions of $\mathcal{F}_a$ and $\mathcal{F}_b$ are not proportional to each other through $\theta_*$ ---generically true when the bases are chosen distinctly (e.g., $\mathcal{F}_a$ uses one set of basis functions, $\mathcal{F}_b$ uses a disjoint or transformed set). $\checkmark$
+- **(D-ID):** §2.1, applies according to the response family. For canonical-link GLM, requires invertible link plus full-rank design (the latter coinciding with (C5)). $\checkmark$
+
+> **Theorem 3.6.** The hierarchical Bayesian model with multiplicative interaction is the AMM Level-2 special case with $W \equiv 0$. Under (LIN), (C6), Abstract FIC at $\theta_*$, and (D-ID), Theorem 1A identifies $(\theta_{\text{ref}}, a, b)$.
+
+*Proof.* Direct from the verifications. $\square$
+
+The substantive content of this case deserves to be promoted to a free-standing observation about the framework's structure.
+
+> **Proposition 3.6.bis (Minimal realization of reference-dependent deviation).** Among the AMM levels of Block 1, the smallest level at which the deviation function $\Delta$ depends nontrivially on the reference $\theta_{\text{ref}}$ ---and at which the dependence is preserved under all conditions for linear identifiability of Theorem 1A--- is **Level 2 with the multiplicative-Hadamard structure** $\Delta(x, \theta_{\text{ref}}) = a(x) + b(x) \odot \theta_{\text{ref}}$ (Theorem 3.6). Removing the multiplicative term reduces to Level 1 (Theorems 3.2-3.4), in which $\Delta$ does not depend on $\theta_{\text{ref}}$.
+>
+> Equivalently, **the multiplicative-Hadamard interaction is the minimal structural ingredient that makes $\theta_{\text{ref}}$ enter $\Delta$ as a non-trivial second argument while preserving (LIN) and admitting linear identifiability via FIC**. Adding the modulated component $W(\theta_{\text{ref}}) x$ produces the canonical Level 2 of Block 1 (Theorem 3.5); both ingredients are part of the framework's distinctive structure, but the multiplicative one is the irreducible minimum.
+
+*Proof.* Levels 0 and 1 have $\Delta$ independent of $\theta_{\text{ref}}$ by definition. The multiplicative-Hadamard term $b(x) \odot \theta_{\text{ref}}$ is the smallest construction that (i) is bilinear in $(x, \theta_{\text{ref}})$, (ii) is identifiable under (LIN), (C6), and FIC by Theorem 1A, and (iii) does not require additional regularity beyond the Block 1 standing assumptions. The modulated term $W(\theta_{\text{ref}}) x$ is also bilinear and reference-dependent but is a separate addition rather than a smaller alternative; hence "minimal realization" refers to the multiplicative-Hadamard term in isolation. $\square$
+
+**Why this matters.** Theorem 3.6 / Proposition 3.6.bis identify the precise mathematical structure that distinguishes the framework from standard hierarchical models with additive random effects (Theorems 3.2 and 3.4). Without the multiplicative-Hadamard term, the framework reduces to known constructions in the literature; with it, $\Delta$ acquires the structural reference-dependence that is the framework's contribution. This is the cleanest formal statement of "what is new" in the AMM canonical form.
+
+---
+
+# **9. Proposition 3.7: Hypernetwork Models**
+
+> **Model.** $\theta_i = h_\phi(x_i, \theta_{\text{ref}})$, where $h_\phi$ is a feedforward neural network with parameters $\phi$ trained with regularization enforcing (C1)-(C4).
+
+**AMM identification.** The realized function $h_\phi$ admits an internal AMM decomposition $h_\phi(x, \theta) = \theta + a_\phi(x) + b_\phi(x) \odot \theta + W_\phi(\theta) x$ when the network is structured as parallel sub-networks (one per AMM component). **AMM Level: $\infty$**.
+
+**Hypothesis verification.**
+
+- **(LIN):** **Fails.** The image of a feedforward neural network is a nonlinear manifold in $L^2$, not a linear subspace. Sums and differences of admissible $a_\phi, b_\phi, W_\phi$ are not generally in the image of the network. $\times$
+- **Abstract FIC, (EVAL):** Not applicable in the formulation that requires (LIN). $\times$
+- **(D-ID):** Standard for the response distribution; this is the only Block 1-level hypothesis that the hypernetwork case retains. $\checkmark$
+
+**Conclusion: outside Theorem 1A, within Proposition 1F.**
+
+> **Proposition 3.7.** Hypernetwork models are **not** subsumed by Theorem 1A: (LIN) fails. They are subsumed by **Proposition 1F**, which states that:
+>
+> (i) The realized function $\Phi_\phi$ is the object of inference.
+> (ii) The network parameters $\phi$ are not identifiable from $\Phi_\phi$ due to standard symmetries.
+> (iii) Under (D-ID), $\Phi_\phi$ is identifiable up to **$L^2(\mu \otimes \pi_\Theta; \mathbb{R}^p)$-equivalence**, where $\mu \otimes \pi_\Theta$ is the product measure on $\mathcal{X} \times \Theta$ that the framework treats as the natural domain of $\Phi_\phi$ (covariates from $\mu$, reference values from the prior $\pi_\Theta$). This is a function-level claim strictly weaker than identifiability of the AMM decomposition $(a_\phi, b_\phi, W_\phi)$.
+>
+> The empirical discrimination protocol of Block 1 §6.8.1 provides operational diagnostics to distinguish, for a given fitted hypernetwork, between the cases where Path 3's predictions reflect richer structure that Path 1 cannot capture and the cases where the predictions reflect undetected non-identifiability.
+
+*Proof.* From Proposition 1F and the failure of (LIN) verified above. The hypernetwork case is the principled exception to Theorem 1A's scope and is treated by its own proposition. $\square$
+
+---
+
+# **10. Summary of Subsumption Map**
+
+The block establishes the following formal subsumption map between standard predictive models and AMM levels.
+
+| Standard model | AMM Level | Restriction | Subsumption result | Key hypothesis | Identifiability type |
+|:---------------|:---------:|:------------|:-------------------|:---------------|:---------------------|
+| Linear regression (Theorem 3.1) | 0 | $a, b, W \equiv 0$ | Theorem 1A trivially | (D-ID) | Parametric (finite-dim) |
+| Hierarchical with covariate REs (Theorem 3.2) | 1 | $a$ linear, $b, W \equiv 0$ | Theorem 1A | $\mathrm{Cov}(X)$ full rank | Parametric (finite-dim) |
+| Random-coefficient (Theorem 3.3) | 1 (marginal) | latent additive | Marginal subsumption only | (R1)-(R4) of §5 | Marginal (first + second moments) |
+| Hastie-Tibshirani VCM (Theorem 3.4) | 1 | $a$ smooth via splines, $b, W \equiv 0$ | Theorem 1A | Spline Gram non-singular | Functional within $\mathcal{F}_a$ (finite-dim spline) |
+| Reference-modulated VCM (Theorem 3.5) | 2 | $a, W$ via splines, $b \equiv 0$ | Theorem 1A + 1E | (EVAL) + orthogonal-class construction | Functional within $\mathcal{F}_a, \mathcal{F}_W$ (finite-dim spline) |
+| Hierarchical Bayesian + multiplicative (Theorem 3.6) | 2 | $a, b$ free, $W \equiv 0$ | Theorem 1A | (C6), Abstract FIC | Parametric / Functional within finite-dim bases |
+| Hypernetwork (Proposition 3.7) | $\infty$ | All neural | Outside Theorem 1A; Proposition 1F | (D-ID), regularization | Functional in $L^2(\mu \otimes \pi_\Theta)$ (non-parametric, equivalence class) |
+
+**Identifiability-type column reading.** The column distinguishes four substantively different senses of identifiability that appear in the framework:
+
+- **Parametric (finite-dim).** A finite-dimensional parameter vector is identified pointwise as a single value. Standard regression and hierarchical linear models.
+- **Marginal.** The model's parameter is identified through the marginal likelihood after integrating out latent components; identification covers first and second moments separately. Random-coefficient models.
+- **Functional within a chosen finite-dim function class.** A function (e.g., a spline expansion) is identified as an element of a chosen finite-dim space; the projection onto that space is what is recovered, not the underlying infinite-dim function. Varying-coefficient models (3.4, 3.5) and the hierarchical Bayesian with multiplicative interaction (3.6).
+- **Functional in $L^2(\mu \otimes \pi_\Theta)$ as an equivalence class.** A function is identified up to a measure-theoretic equivalence on the product domain, with no claim about pointwise values; the AMM decomposition into components is **not** identified. Hypernetworks (3.7).
+
+The four types reflect distinct mathematical commitments and should not be conflated. The framework's identifiability theorems target the first three; the fourth requires a separate path (Proposition 1F).
+
+The map is **not exhaustive of the literature**: many other formulations (e.g., partial-linear models, generalized additive mixed models, deep state-space models) admit similar subsumption arguments under their respective parametric structures. The seven cases above cover the most representative classes and establish a concrete sense in which "the framework subsumes standard predictive models" is a verifiable claim, not a slogan.
+
+**The subsumption map is constructive in two directions.**
+
+- *From standard model to AMM:* given a standard model in the literature, the user can identify its AMM Level and apply Theorem 1A or Proposition 1F to obtain identifiability conditions specific to that model, with the framework's centering and FIC machinery providing systematic structure where the original literature might rely on case-by-case arguments.
+- *From AMM to standard model:* given a fit produced by the framework, restricting components to zero recovers a standard model. This is the operational meaning of the framework's generality: the user does not have to choose between AMM and standard models; standard models are AMM with specific zero restrictions.
+
+---
+
+# **11. Connections to Subsequent Blocks**
+
+- **Block 4** (asymptotic theory of Path 1) treats the consistency of fitted parameters in hierarchical Bayesian models, specializing to Theorems 3.2 and 3.6.
+- **Block 5** (asymptotic theory of Path 2) treats the consistency of fitted varying-coefficient models, specializing to Theorems 3.4 and 3.5.
+- **Block 6** (asymptotic theory of Path 3, partial) treats the convergence properties of hypernetworks, addressing Proposition 3.7 with the open questions explicitly recognized.
+- **Block 7** (Empirical Bayes vs. Fully Bayes) addresses the comparison between marginal and hierarchical estimation strategies, relevant to the hierarchical models of Theorems 3.2 and 3.6.
+- **Block 8** (CATE/ITE positioning) discusses how the framework relates to and differs from heterogeneous treatment effect estimators, which are related to but not coincident with the AMM cases listed here.
+
+---
+
+# **Appendix A. Verification Checklist Template**
+
+For any standard predictive model claimed as a special case of AMM, the following checklist replicates the verification structure used in Theorems 3.1-3.7. The user can apply the same template to other models in the literature.
+
+```
+[ ] Standard model stated formally.
+[ ] AMM Level identified (0, 1, 2, 2.5, 3, K, or ∞).
+[ ] Restriction of (F_a, F_b, F_W) specified.
+[ ] (LIN) verified: F_a, F_b, F_W are finite-dim linear subspaces.
+[ ] (C1) verified: E[X] = 0 (centering).
+[ ] (C2) verified: E[a(X)] = 0 (functional centering of a).
+[ ] (C3) verified: E[b(X)] = 0 (functional centering of b).
+[ ] (C4) verified: W(theta_0) = 0 (anchoring).
+[ ] (C5) verified: Cov(X) full rank, integrability.
+[ ] (C6) verified: theta_* has no zero coordinates (or reparametrize).
+[ ] Abstract FIC at theta_*: linear independence of subspaces.
+[ ] (EVAL) verified (if necessity is invoked): point-evaluation surjective.
+[ ] (D-ID) verified: response distribution identifiable in theta.
+[ ] Conclusion: Theorem 1A (Lemma 1B / Theorem 1E / Proposition 1F) applies.
+```
+
+The framework's library implements this checklist as an automated diagnostic when a standard model is fit through one of the AMM-restricted entry points.
+
+---
+
+# **References Cited in This Block**
+
+Demidenko, E. (2013). *Mixed Models: Theory and Applications with R*, 2nd ed. Wiley.
+
+Fan, J., and Zhang, W. (2008). Statistical methods with varying coefficient models. *Statistics and Its Interface*, 1(1), 179--195.
+
+Hastie, T., and Tibshirani, R. (1993). Varying-coefficient models. *Journal of the Royal Statistical Society, Series B*, 55(4), 757--796.
+
+Raudenbush, S. W., and Bryk, A. S. (2002). *Hierarchical Linear Models: Applications and Data Analysis Methods*. Sage.
+
+Wood, S. N. (2017). *Generalized Additive Models: An Introduction with R*, 2nd ed. Chapman and Hall/CRC.

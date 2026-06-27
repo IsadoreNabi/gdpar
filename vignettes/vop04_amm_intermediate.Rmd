@@ -1,0 +1,263 @@
+---
+title: "**Intermediate AMM Specifications: B-spline `W` Bases and Heterogeneous Families per Slot**"
+subtitle: "Tutorial for users moving past the polynomial / homogeneous baseline (Path 1)"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Intermediate AMM Specifications: B-spline W Bases and Heterogeneous Families per Slot}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  collapse = TRUE, comment = "#>"
+)
+have_cmdstan <- requireNamespace("cmdstanr", quietly = TRUE) &&
+  isTRUE(try(cmdstanr::cmdstan_version(), silent = TRUE) != "")
+```
+
+---
+
+# **1. What this vignette covers**
+
+The AMM canonical decomposition
+
+$$\theta_i = \theta_{\text{ref}} + a(x_i) + b(x_i) \odot \theta_{\text{ref}} + W(\theta_{\text{ref}})\,x_i,$$
+
+where $\odot$ denotes the Hadamard (elementwise) product, coherent with the canonical notation of `vignette("v00_framework_overview", package = "gdpar")` §8.2 and `vignette("v01_amm_identifiability", package = "gdpar")` §3.3,
+
+allows two refinements that take a model out of the polynomial / homogeneous baseline and into the *intermediate* regime — that is, still a single-anchor canonical fit, but with a richer modulating geometry and per-slot heterogeneous families when the user runs distributional regression (`K > 1`). This vignette documents both refinements in the order in which a user typically encounters them.
+
+1. **B-spline `W` bases** (sub-phase 8.3.8). The default `W_basis(type = "polynomial", dim = 2L)` is sufficient when the modulating effect $W(\theta_{\text{ref}})$ is smooth and low-curvature. For non-monotone or sharply varying effects, a B-spline basis preserves the AMM canonical form while giving local flexibility.
+2. **Heterogeneous families per slot** (sub-phase 8.3.7). For distributional regression `K > 1`, the default homogeneous family (the same `gdpar_family` for every slot) can be replaced by a *named list* of `gdpar_family` objects, one per slot, when the location slot's likelihood admits multiple compatible auxiliary parametrizations (e.g., a Gaussian location with a Beta-distributed dispersion slot).
+
+Both refinements are orthogonal: a fit may combine a B-spline `W` with heterogeneous families, or use one without the other.
+
+For the API of `K > 1` distributional regression as a whole and for the residual / DHARMa workflow that complements these fits, see `vignette("vop05_distributional_K_dharma", package = "gdpar")`.
+
+---
+
+# **2. B-spline `W` bases**
+
+## **2.1. When to switch from polynomial to B-spline**
+
+`W(\theta_{\text{ref}})` is a univariate function of the anchor evaluated at each observation's posterior reference value. The polynomial basis of dimension $\dim_W$ writes
+
+$$W(\theta_{\text{ref}}) = \sum_{j=1}^{\dim_W} W_j \,(\theta_{\text{ref}}^j - \theta_{\text{anchor}}^j),$$
+
+which is smooth and parsimonious but globally rigid. For modulating effects that are *piecewise* smooth — for example, a saturating curve or a sigmoidal shift — a B-spline basis evaluates a local set of basis functions, each supported on a few neighbouring knots, and gives finer control over local curvature without inflating the global degree.
+
+**Rule of thumb.** Start with `W_basis(type = "polynomial", dim = 2L)` (the default). Switch to B-spline when (i) posterior predictive checks (see `vignette("vop05_distributional_K_dharma")`) show systematic deviations of `W` away from a global low-degree polynomial, or (ii) you have prior knowledge that the modulating effect is non-monotone over the operative range of `theta_ref`.
+
+## **2.2. API**
+
+```{r bspline-api, eval=FALSE}
+library(gdpar)
+
+# Polynomial baseline (default)
+W_poly <- W_basis(type = "polynomial", dim = 2L)
+
+# B-spline with internal knots given explicitly, cubic by default
+W_bs <- W_basis(
+  type           = "bspline",
+  knots          = c(-0.5, 0.0, 0.5),
+  degree         = 3L,
+  boundary_knots = c(-1.5, 1.5)
+)
+```
+
+Three points of contract:
+
+- `boundary_knots` is **mandatory** for B-spline bases (sub-phase 8.3.8, decision D4). It pins the domain of the basis evaluation; outside it, the R-side validator aborts. Stan-side evaluation is unconstrained, mirroring the conventional `splines::bs()` behaviour, but a fit that crosses the boundary at sampling time will return basis values that extrapolate. Set `boundary_knots` to cover the operative range of `theta_ref` with a small margin (e.g., 5 to 10% of the prior anchor's marginal SD on each side).
+- `degree = 3L` is the default (cubic). `degree = 1L` gives piecewise linear basis functions; `degree = 2L` quadratic. Higher than cubic is rarely needed and increases the dimension of `W_raw` (which is $\dim_W = \text{length}(\text{knots}) + \text{degree} - 1$ for a clamped basis without boundary repetition).
+- The Stan-side evaluator uses a Cox-de Boor recursion (sub-phase 8.3.8, decision D2) that runs once per draw and per observation; performance is comparable to a polynomial basis up to $\dim_W \approx 10$.
+
+## **2.3. End-to-end example**
+
+```{r bspline-example, eval=FALSE}
+set.seed(2026L)
+n <- 80L
+theta_ref_true <- 0.5
+# A sigmoidal modulating effect that the polynomial baseline cannot
+# represent without raising dim_W substantially.
+x_var <- runif(n, -2, 2)
+W_true <- function(z) 1.2 / (1 + exp(-3 * z)) - 0.6
+y <- theta_ref_true + 0.4 * (x_var - mean(x_var)) +
+  W_true(theta_ref_true) * (x_var - mean(x_var)) * 0.7 +
+  rnorm(n, sd = 0.2)
+d <- data.frame(y = y, x = x_var)
+
+library(gdpar)
+fit_bs <- gdpar(
+  y ~ a(x) + W(),
+  data   = d,
+  family = gdpar_family("gaussian"),
+  W      = W_basis(type = "bspline",
+                   knots = c(-1, 0, 1),
+                   degree = 3L,
+                   boundary_knots = c(-2.2, 2.2)),
+  chains = 2L, iter_warmup = 400L, iter_sampling = 400L,
+  refresh = 0L
+)
+
+co <- coef(fit_bs)
+co
+```
+
+The `coef()` output reports the per-basis coefficient `W_raw[j, k]` summarised by posterior mean and 5%/50%/95% quantiles, exactly as in the polynomial case. Compare with a polynomial fit of the same `dim_W` to see whether the B-spline absorbs structure that the polynomial flattens.
+
+## **2.4. Diagnostics and known limitations**
+
+- **In-sample prediction** with `predict(fit_bs)` returns posterior draws of `theta_i` on the training data, evaluated through the B-spline basis.
+- **New-data prediction** (`predict(fit_bs, newdata = ...)`) is implemented for `K = 1` polynomial `W`; B-spline new-data prediction is supported through the same `predict.gdpar_fit` API and reads the Stan-side `apply_W_basis_diff()` helper at fit time. For `K > 1` distributional regression, B-spline new-data prediction is queued for Session 8.4 and raises `gdpar_unsupported_feature_error`.
+- **Boundary violation.** If the posterior of `theta_ref` drifts outside the `boundary_knots` range, the basis values extrapolate. The R-side validator inspects the prior's anchor mean ± 3 SD at construction time and warns if the range is too tight; the user can either widen `boundary_knots` or tighten the anchor prior.
+
+---
+
+# **3. Heterogeneous families per slot (`K > 1`)**
+
+## **3.1. The default homogeneous case**
+
+For distributional regression `K > 1`, `gdpar()` accepts a single `gdpar_family` and replicates the canonical per-slot parametrization across every slot. For Gaussian `K = 2`, slot 1 is the location (`mu` with identity link) and slot 2 is the dispersion (`sigma` with log link). The two slots share the same Gaussian likelihood family; only the slot-specific link differs.
+
+```{r het-default-api, eval=FALSE}
+fit <- gdpar(
+  gdpar_bf(y ~ a(x1), sigma ~ a(x2)),
+  data   = d,
+  family = gdpar_family("gaussian"),
+  chains = 2L, iter_warmup = 400L, iter_sampling = 400L
+)
+```
+
+## **3.2. When to declare heterogeneous families**
+
+The heterogeneous-per-slot path (sub-phase 8.3.7, decision D5) targets the use case where the *auxiliary slots* (slot $k > 1$) have a different parametric structure than the location slot. Two motivating examples:
+
+- The location is Gaussian (an additive structure on $y$) but the dispersion is bounded in $(0, 1)$ and naturally Beta-distributed (e.g., when the dispersion is a normalised heterogeneity index).
+- The location is Poisson (counts) but the dispersion is Gamma-distributed (a positive continuous spread parameter that arises in some count-overdispersion models).
+
+The canonical decision D5 (sub-phase 8.3.7) also restricts heterogeneous specifications to *compatible families*: slot 1 ("location") must belong to the canonical primary `{gaussian, poisson, neg_binomial_2, beta, gamma, lognormal_loc_scale}` family-id set, and slot $k > 1$ must declare a family whose `support` is coherent with the slot's canonical role. Incompatible combinations (e.g., a Gaussian location with a Bernoulli dispersion) are rejected by `.gdpar_validate_heterogeneous_family_K` with `gdpar_input_error`.
+
+The pattern name `lognormal_loc_scale` listed in the primary family-id set above is **not part of the enum of `gdpar_family(name)`**: the package registers it as a `K = 2` *custom-family pattern* (canonised in Sub-phase 8.3.4), accessed via `gdpar_family_custom_K(stan_lpdf_id = "lognormal_loc_scale", ...)`. See `vignette("vop05_distributional_K_dharma", package = "gdpar")` §2.4 for the literal recipe and `vignette("vop05_distributional_K_dharma", package = "gdpar")` §6 for the complementary `gdpar_family_custom()` (`K = 1`) constructor.
+
+On the Stan side, the per-slot dispatch of the inverse link is implemented by the helper function `apply_inv_link_by_id(link_id, eta)` canonised in `inst/stan/amm_distrib_K.stan:228`. It maps the integer `link_id` carried per slot in the data block (`inv_link_id_per_slot`) to the corresponding inverse-link evaluation, so that each slot's linear predictor is transformed by its own `inv_link` without conditional R-side branching at compile time. This is the Stan-side mechanism that makes the heterogeneous-per-slot path of Sub-phase 8.3.7 transparent to the model template.
+
+## **3.3. API**
+
+```{r het-api, eval=FALSE}
+fit_het <- gdpar(
+  gdpar_bf(y ~ a(x1), sigma ~ a(x2)),
+  data   = d,
+  family = list(
+    mu    = gdpar_family("gaussian"),
+    sigma = gdpar_family("beta")
+  ),
+  chains = 2L, iter_warmup = 400L, iter_sampling = 400L
+)
+```
+
+The named list keys must match the slot names of the `gdpar_formula_set` (the `bf()` constructor's left-hand side names, or the `param_specs` names of the location family). Mismatches raise `gdpar_input_error` with the expected slot names listed.
+
+Sub-phase 8.3.7 supports heterogeneous specifications for `K = 2` in three combinations of practical interest:
+
+- Gaussian location + Beta dispersion.
+- Gaussian location + Gamma dispersion.
+- Negative-binomial-2 location + Beta dispersion (the so-called *zero-inflated negative binomial with Beta-distributed dispersion*; see Greene 1994 for the source motivation in count regression with overdispersed compounding).
+
+Other combinations are queued for sub-phase 8.4 (heterogeneous `K = 3+` families) and emit `gdpar_unsupported_feature_error` at construction time with a message pointing to Session 8.4 deudas.
+
+## **3.4. End-to-end example**
+
+```{r het-example, eval=FALSE}
+set.seed(818L)
+n <- 100L
+x1 <- rnorm(n); x2 <- rnorm(n)
+mu_true   <- 0.3 + 0.6 * (x1 - mean(x1))
+sigma_eta <- 0.5 + 0.3 * (x2 - mean(x2))
+# Beta-distributed sigma in (0, 1) via inverse-logit of sigma_eta
+sigma_p <- 1 / (1 + exp(-sigma_eta))
+y <- rbeta(n, shape1 = 2 + 5 * sigma_p, shape2 = 5 - 4 * sigma_p)
+d <- data.frame(y = y, x1 = x1, x2 = x2)
+
+fit_het <- gdpar(
+  gdpar_bf(y ~ a(x1), sigma ~ a(x2)),
+  data   = d,
+  family = list(
+    mu    = gdpar_family("beta"),
+    sigma = gdpar_family("beta")
+  ),
+  chains = 2L, iter_warmup = 400L, iter_sampling = 400L,
+  refresh = 0L
+)
+
+co <- coef(fit_het)
+str(co, max.level = 2L)
+```
+
+`coef.gdpar_fit` for `K > 1` returns a named list of `gdpar_coef` objects, one per slot (decision E4.A, sub-phase 8.3.10). Each entry follows the standard scalar contract (`theta_ref`, `a`, `b`, `W` sub-components with posterior summaries) and can be coerced to a long-tidy data frame via `as.data.frame`.
+
+## **3.5. Identifiability and information diagnostics**
+
+The heterogeneous path runs the same identifiability diagnostics as the homogeneous one:
+
+- **Pre-fit** (`identifiability_report` slot of `gdpar_fit`): C4-bis cross-slot Gram check, rank check of each slot's `Z_a` design, and slot-aware information ratio.
+- **Post-fit** (`identifiability_post_fit` slot): information contraction per slot. A ratio below 0.1 emits `gdpar_information_error` warning; in $[0.1, 0.5)$ emits `gdpar_information_warning`; above 0.5 is silent.
+
+When the dispersion slot's canonical kind is Beta or Gamma, the prior on its anchor `theta_ref_k[k]` is the canonical one of the *slot's family* (not the location's), via the placeholder `THETA_REF_PRIOR_BLOCK` resolved at codegen time. This is the decision D-ID per-slot of sub-phase 8.3.4 generalised to heterogeneous specifications.
+
+---
+
+# **4. Combining B-spline `W` with heterogeneous families**
+
+The two refinements are orthogonal at the design level. A typical combined fit declares:
+
+```{r combined-api, eval=FALSE}
+fit_combo <- gdpar(
+  gdpar_bf(y ~ a(x1) + W(), sigma ~ a(x2)),
+  data   = d,
+  family = list(
+    mu    = gdpar_family("gaussian"),
+    sigma = gdpar_family("beta")
+  ),
+  W      = W_basis(type = "bspline", knots = c(-1, 0, 1),
+                   degree = 3L, boundary_knots = c(-2.5, 2.5)),
+  chains = 2L, iter_warmup = 400L, iter_sampling = 400L
+)
+```
+
+The `W` block is *globally shared* across slots (canonical decision: "Scope of W: global", handoff 28). The same `W_raw` and `sigma_W` enter the linear predictor of every slot, evaluated at the slot's own `theta_ref_k[k]` and anchored at the slot's `theta_anchor_K[k]`. This is by design and reflects the role of `W` as a structural coupler in the AMM canonical form; the alternatives (W-per-slot, W-only-in-mu) are queued as scope deudas for Session 8.4.
+
+---
+
+# **5. Known limitations and future work**
+
+- **K > 1 with grouping** (`J_groups > 1`): both `coef.gdpar_fit` and `predict.gdpar_fit` with `newdata` raise `gdpar_unsupported_feature_error`; the in-sample path (`predict(fit, newdata = NULL)`) is supported. Session 8.4 will extend the per-slot extraction to per-group threading.
+- **K > 1 with B-spline `W` on new data** (`predict(fit, newdata = ..., type = ...)`): the in-sample path supports B-spline through `apply_W_basis_diff()` in Stan; the R-side reconstruction on new data presently mirrors only the polynomial branch. Session 8.4 will lift this.
+- **Heterogeneous `K = 3+`**: sub-phase 8.3.7 covers `K = 2` combinations only. `K = 3` extensions (Student-t with heterogeneous dispersion, Tweedie with heterogeneous power, mixtures with heterogeneous mixture weight) are queued for Session 8.4.
+
+For the residual diagnostics that complement these intermediate specifications — including `gdpar_dharma_object()` and the three-layer G1 / G2 / G3 residual hierarchy — see `vignette("vop05_distributional_K_dharma", package = "gdpar")`.
+
+---
+
+# **References**
+
+- Dunn, P. K., & Smyth, G. K. (1996). Randomized quantile residuals. *Journal of Computational and Graphical Statistics*, 5(3), 236--244.
+- Greene, W. H. (1994). Accounting for excess zeros and sample selection in Poisson and negative binomial regression models. *NYU Stern Working Paper EC-94-10*.
+- Wood, S. N. (2017). *Generalized Additive Models: An Introduction with R* (2nd ed.). Chapman and Hall/CRC.

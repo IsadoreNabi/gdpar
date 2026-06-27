@@ -1,0 +1,373 @@
+---
+title: "**Theoretical Addendum -- Block 7:**"
+subtitle: "Empirical Bayes vs. Fully Bayes Treatment of the Population Reference"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{Empirical Bayes vs. Fully Bayes Treatment of the Population Reference}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+---
+
+# **1. Purpose**
+
+The framework's hierarchical structure has $\theta_{\text{ref}}$ at the top of the hierarchy: a population-level parameter that anchors the individual-level deviations $\Delta(x_i, \theta_{\text{ref}})$. Two estimation strategies for $\theta_{\text{ref}}$ are available:
+
+- **Empirical Bayes (EB).** $\theta_{\text{ref}}$ is treated as a hyperparameter and estimated from the data by maximizing the marginal likelihood (Type II maximum likelihood). The resulting $\widehat{\theta}_{\text{ref}}$ is then plugged into the conditional posterior of the lower-level parameters given $\widehat{\theta}_{\text{ref}}$.
+- **Fully Bayes (FB).** $\theta_{\text{ref}}$ is given its own prior $\pi_\Theta$ and the joint posterior over $(\theta_{\text{ref}}, a, b, W)$ is obtained by sampling (typically via MCMC).
+
+Block 1 of the addendum required a specification of the framework's joint identifiability theory; the question of **how** $\theta_{\text{ref}}$ is then estimated ---empirically or fully Bayesian--- is the operational layer that this block addresses. The choice has consequences for:
+
+(i) **Computational cost** (EB is typically $\sim 10$-$100\times$ faster than FB for hierarchical models),
+(ii) **Calibration of credible intervals** (FB propagates the uncertainty in $\theta_{\text{ref}}$; EB ignores it, leading to under-coverage in finite samples),
+(iii) **Asymptotic behavior** (the two are equivalent at first order under regularity; differences appear at higher orders and in finite samples),
+(iv) **Robustness to prior misspecification** (EB is more sensitive to weakly informative prior choices on lower-level parameters; FB inherits prior structure from $\pi_\Theta$).
+
+This block organizes the EB-vs.-FB question in three layers parallel to those of Blocks 4-6:
+
+- **(L1) First-order asymptotic equivalence.** As $n \to \infty$ under regularity, the EB and FB posteriors over the lower-level parameters coincide to first order.
+- **(L2) Higher-order discrepancy.** EB credible intervals under-cover by an amount of order $n^{-1}$ that the framework characterizes explicitly.
+- **(L3) Finite-sample compound decision.** Robbins-Efron compound decision theory gives finite-sample bounds on the gain (or loss) of EB versus FB depending on the structure of the parameter heterogeneity.
+
+The block is treated through this structure, with theorems for each layer, explicit hypotheses, and an operational decision rule (§9) for choosing EB vs. FB based on sample size, prior strength, and structural features. The framework's recommendation by default is **FB**, with EB as an explicit configuration option; the reasons are explained in §9.
+
+---
+
+# **2. Setting and Notation**
+
+## **2.1. Formal Specification of EB and FB**
+
+Let $\eta = (\theta_{\text{ref}}, a, b, W)$ as in Block 4 §2.1. Partition the parameter into the **upper-level** parameter $\theta_{\text{ref}}$ and the **lower-level** function-valued components $\xi := (a, b, W)$ for compactness.
+
+**Empirical Bayes (EB).** Let $L_n^{\text{marg}}(\theta_{\text{ref}}) := \int p(Y_{1:n} \mid \theta_{\text{ref}}, \xi) \pi_\xi(\xi) \, d\xi$ be the marginal likelihood of $\theta_{\text{ref}}$ obtained by integrating out the lower-level parameters under their prior $\pi_\xi$. The EB estimator of $\theta_{\text{ref}}$ is
+$$\widehat{\theta}_{\text{ref}}^{\text{EB}} \;=\; \mathop{\arg\max}_{\theta_{\text{ref}} \in \Theta} \; L_n^{\text{marg}}(\theta_{\text{ref}}).$$
+
+The EB posterior over the lower-level parameters is then the **conditional** posterior given $\widehat{\theta}_{\text{ref}}^{\text{EB}}$:
+$$\Pi_n^{\text{EB}}(\xi \,\big|\, Y_{1:n}, X_{1:n}) \;\propto\; p(Y_{1:n} \mid \widehat{\theta}_{\text{ref}}^{\text{EB}}, \xi) \pi_\xi(\xi).$$
+
+**Fully Bayes (FB).** Let $\pi_\Theta$ be a prior on $\theta_{\text{ref}}$. The FB joint posterior is
+$$\Pi_n^{\text{FB}}(\theta_{\text{ref}}, \xi \,\big|\, Y_{1:n}, X_{1:n}) \;\propto\; p(Y_{1:n} \mid \theta_{\text{ref}}, \xi) \pi_\Theta(\theta_{\text{ref}}) \pi_\xi(\xi),$$
+and the marginal posterior over $\xi$ is obtained by integrating out $\theta_{\text{ref}}$:
+$$\Pi_n^{\text{FB}}(\xi \,\big|\, Y_{1:n}, X_{1:n}) \;=\; \int \Pi_n^{\text{FB}}(\theta_{\text{ref}}, \xi \,\big|\, \cdot) \, d\theta_{\text{ref}}.$$
+
+The contrast: EB plugs in a point estimate $\widehat{\theta}_{\text{ref}}^{\text{EB}}$ and conditions on it; FB integrates over the full posterior of $\theta_{\text{ref}}$.
+
+## **2.2. Distance Between EB and FB Posteriors**
+
+The asymptotic comparison uses the **total variation distance** between the two posteriors over $\xi$:
+$$d_{\text{TV}}\bigl(\Pi_n^{\text{EB}}, \Pi_n^{\text{FB}}\bigr) \;=\; \sup_{B} \;\bigl| \Pi_n^{\text{EB}}(\xi \in B) - \Pi_n^{\text{FB}}(\xi \in B) \bigr|.$$
+
+Smaller $d_{\text{TV}}$ indicates closer agreement between the two strategies; first-order asymptotic equivalence (Theorem 7A) shows $d_{\text{TV}} \to 0$ under regularity.
+
+## **2.3. Notation Summary**
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $\theta_{\text{ref}}$ | Population reference parameter (upper-level) |
+| $\xi = (a, b, W)$ | Function-valued lower-level parameters |
+| $\pi_\Theta, \pi_\xi$ | Priors on upper- and lower-level parameters |
+| $L_n^{\text{marg}}(\theta_{\text{ref}})$ | Marginal likelihood of $\theta_{\text{ref}}$ |
+| $\widehat{\theta}_{\text{ref}}^{\text{EB}}$ | EB estimator (Type II ML) |
+| $\Pi_n^{\text{EB}}(\xi \mid \cdot)$ | EB posterior (conditional on $\widehat{\theta}_{\text{ref}}^{\text{EB}}$) |
+| $\Pi_n^{\text{FB}}(\xi \mid \cdot)$ | FB marginal posterior (over $\xi$, integrating out $\theta_{\text{ref}}$) |
+| $d_{\text{TV}}$ | Total variation distance |
+| $I_{\theta\theta}^{\text{marg}}$ | Fisher information of the marginal likelihood at $\theta_{\text{ref}}^*$ |
+| $\mathrm{Var}_\pi(\theta_{\text{ref}})$ | Prior variance of $\theta_{\text{ref}}$ (FB) |
+| $\mathrm{Var}_n(\theta_{\text{ref}}^*)$ | Posterior variance of $\theta_{\text{ref}}$ given data (FB), in the limit |
+
+---
+
+# **3. Three Layers of EB-vs-FB Comparison**
+
+- **(L1) First-order asymptotic equivalence.** As $n \to \infty$ under regularity, $d_{\text{TV}}(\Pi_n^{\text{EB}}, \Pi_n^{\text{FB}}) \to 0$.
+- **(L2) Higher-order coverage discrepancy.** EB credible intervals for $\xi$ under-cover by an amount of order $n^{-1}$ relative to FB credible intervals; the discrepancy can be quantified.
+- **(L3) Finite-sample compound decision.** For specific structural setups (Robbins compound decision, Efron empirical Bayes), finite-sample bounds compare EB and FB risk explicitly.
+
+---
+
+# **4. Standing Hypotheses for EB-vs-FB Comparison**
+
+In addition to (C1)-(C6), (LIN), (D-ID) of Block 1 and the asymptotic hypotheses of Block 4 (PRIOR-KL, PRIOR-THICK, SIEVE, TEST, LAN):
+
+**(EB-MARG-ID) Identifiability of the marginal likelihood.** $L_n^{\text{marg}}(\theta_{\text{ref}})$ has a unique maximum on $\Theta$ in the limit, with the limiting Fisher information $I_{\theta\theta}^{\text{marg}}$ at $\theta_{\text{ref}}^*$ being non-singular.
+
+This is the EB analog of (LAN) for the marginal likelihood. Without it, $\widehat{\theta}_{\text{ref}}^{\text{EB}}$ may not converge or may have non-Gaussian asymptotic distribution.
+
+**(PRIOR-FB-WEAK) Weak FB prior on $\theta_{\text{ref}}$.** The prior $\pi_\Theta$ is **weakly informative**: $\pi_\Theta$ has positive density at $\theta_{\text{ref}}^*$ and the FB posterior asymptotically dominates the prior in the sense that
+$$\frac{\mathrm{Var}_n(\theta_{\text{ref}}^*)}{\mathrm{Var}_\pi(\theta_{\text{ref}})} \;\to\; 0 \quad \text{as } n \to \infty.$$
+
+This says the data eventually swamps the prior. (PRIOR-FB-WEAK) is mild and is satisfied by typical priors (Gaussian with sufficient variance, Cauchy, Student-$t$).
+
+**(HIER-COMPLEX) Hierarchical complexity bound.** The number of hyperparameters at the upper level is bounded as $n$ grows. (For more elaborate hierarchies with $\theta_{\text{ref}}$ itself depending on a meta-hyperparameter, the analysis in this block extends but is not stated here.)
+
+---
+
+# **5. Theorem 7A: First-Order Asymptotic Equivalence of EB and FB**
+
+> **Theorem 7A. First-order asymptotic equivalence.** Under (C1)-(C6), (LIN), (D-ID), the asymptotic hypotheses of Theorem 4A of Block 4, plus (EB-MARG-ID), (PRIOR-FB-WEAK), and (HIER-COMPLEX), the EB and FB posteriors over $\xi$ agree asymptotically. The **metric in which agreement holds depends on the dimensionality of $\xi$**, with two regimes:
+>
+> **(Regime A) Finite-dim parametric AMM** (Levels 0, 1, or 2 with parametric $a, b, W$). Then:
+> $$d_{\text{TV}}\bigl(\Pi_n^{\text{EB}}, \Pi_n^{\text{FB}}\bigr) \;\xrightarrow{P_{\eta_*}}\; 0 \quad \text{as } n \to \infty,$$
+> with $d_{\text{TV}}$ the standard total variation distance on the finite-dim parameter space.
+>
+> **(Regime B) Non-parametric AMM** (e.g., $a, b, W$ in spline or Gaussian-process classes of growing dimension). Then total variation is **too strong a metric** to converge in general; the appropriate convergence is in **the marginal posteriors over smooth functionals** of $\xi$:
+> $$\sup_{g \in \mathcal{G}} \;\bigl| \mathbb{E}_{\Pi_n^{\text{EB}}}[g(\xi)] - \mathbb{E}_{\Pi_n^{\text{FB}}}[g(\xi)] \bigr| \;\xrightarrow{P_{\eta_*}}\; 0,$$
+> where $\mathcal{G}$ is a class of bounded, $L^2(\mu)$-Lipschitz functionals of $\xi$. Equivalent formulations: convergence of the **finite-dim sieve posteriors** indexed by truncation level, or convergence in a **weak metric** (Wasserstein-1, Prokhorov) on the joint posterior over a separable infinite-dim parameter space.
+
+*Reference and argument.* This is a specialization to AMM of the first-order EB/FB equivalence results of Petrone, Rousseau, and Scricciolo (2014, Theorem 4) and Rousseau and Szabo (2017, Theorem 3), which establish that the EB and FB posteriors agree asymptotically when:
+
+- The marginal likelihood concentrates around its maximum at parametric rate (provided by (EB-MARG-ID)).
+- The prior on the upper-level parameter is dominated by the data asymptotically (provided by (PRIOR-FB-WEAK)).
+- The lower-level posterior depends on the upper-level parameter smoothly (provided by (LIN) plus the standard regularity of Block 4).
+
+The argument decomposes the FB posterior as the average of the conditional posterior given $\theta_{\text{ref}}$ over the marginal posterior of $\theta_{\text{ref}}$. Under (PRIOR-FB-WEAK), the marginal posterior of $\theta_{\text{ref}}$ concentrates at $\widehat{\theta}_{\text{ref}}^{\text{EB}}$ (which coincides asymptotically with the posterior mode), and the conditional posterior at the concentration point coincides with the EB posterior. The difference between FB and EB is thus the difference between integrating with respect to a concentrated distribution and evaluating at its mode, which goes to zero in the appropriate metric for the dimension of $\xi$. $\square$
+
+**Why total variation is restricted to Regime A.** In non-parametric Bayesian inference (van der Vaart and van Zanten 2008; Ghosal-van der Vaart 2017), the posterior over an infinite-dim parameter typically does not converge to a fixed limit in total variation: the posterior concentrates in Hellinger or in $L^2(\mu)$ distance but TV is "too sensitive to local perturbations". Theorem 7A in Regime B therefore states convergence in the weaker functional metric, which is the standard convergence mode in non-parametric Bayes and is the right object to compare across EB and FB.
+
+**Practical implication of Theorem 7A.** For large $n$ and a weakly informative prior on $\theta_{\text{ref}}$, **EB and FB give essentially the same posterior over $\xi$** in the metric appropriate to the dimensionality of $\xi$. The choice between them is therefore primarily computational (EB is faster) and methodological (EB does not require a prior on $\theta_{\text{ref}}$, which may be desired or avoided).
+
+---
+
+# **6. Proposition 7B: Higher-Order Coverage Discrepancy of EB**
+
+> **Proposition 7B. Higher-order coverage discrepancy under standard expansions.** Under the hypotheses of Theorem 7A and the additional regularity required by **standard higher-order expansions** ---specifically, smoothness of the functional $g$ at $\xi^*$ in the sense of three or more bounded derivatives, well-conditioned $I_{\theta\theta}^{\text{marg}}$ at the truth, and the Edgeworth-type expansion conditions of Bickel and Ghosh (1990)--- the EB credible interval for a smooth functional $g(\xi)$ has coverage that differs from the nominal level by an amount of order $n^{-1}$:
+> $$\mathbb{P}_{\eta_*}\bigl( g(\xi^*) \in \mathrm{CI}_n^{\text{EB}, \alpha} \bigr) \;=\; (1 - \alpha) - C_{g, \alpha} \cdot n^{-1} + o(n^{-1}),$$
+> where $C_{g, \alpha} > 0$ is a constant depending on the second-order curvature of $g$ at $\xi^*$ and on the Fisher information $I_{\theta\theta}^{\text{marg}}$. The FB credible interval has coverage of nominal level to first order:
+> $$\mathbb{P}_{\eta_*}\bigl( g(\xi^*) \in \mathrm{CI}_n^{\text{FB}, \alpha} \bigr) \;=\; (1 - \alpha) + o(n^{-1/2}).$$
+> Under the stated standard expansion conditions, **EB credible intervals therefore systematically under-cover** relative to FB at the $n^{-1}$ rate. Outside these conditions ---e.g., for non-smooth functionals, near-singular Fisher information, or distributions where Edgeworth expansions fail--- the coverage discrepancy may be of different order or may not admit a closed expression, and the framework defaults to FB whenever the standard expansion conditions are in doubt.
+
+*Reference.* Higher-order coverage of EB credible intervals is treated in Carlin and Gelfand (1990), Laird and Louis (1987), and reviewed in Efron (2019, §6). The under-coverage arises because EB conditions on a point estimate of $\theta_{\text{ref}}$ and ignores the variability in $\widehat{\theta}_{\text{ref}}^{\text{EB}}$; FB integrates over this variability and produces a wider credible interval.
+
+**Quantitative form of the under-coverage constant.** For a one-dimensional smooth functional $g$, the constant $C_{g, \alpha}$ is approximately
+$$C_{g, \alpha} \;\approx\; \frac{(g'(\xi^*))^2}{I_{\theta\theta}^{\text{marg}}} \cdot \kappa(\alpha),$$
+where $\kappa(\alpha)$ is a function of the nominal level (e.g., $\kappa(0.05) \approx 1.92$ for the standard normal). The under-coverage is **larger when the functional is more sensitive to $\theta_{\text{ref}}$** (larger $g'(\xi^*)$) and **smaller when $\theta_{\text{ref}}$ is well-identified** (larger $I_{\theta\theta}^{\text{marg}}$).
+
+**Operational consequence.** The framework's library reports EB credible intervals with an explicit **post-hoc inflation correction** based on Proposition 7B: the EB interval width is multiplied by a factor approximately $\sqrt{1 + C_{g, \alpha}/(n - q)}$ to recover nominal coverage. This is a partial correction; full coverage requires FB or simulation-based calibration.
+
+**Caveat: the correction is approximate.** Carlin-Gelfand and related corrections assume regularity (smooth $g$, well-conditioned $I_{\theta\theta}^{\text{marg}}$) and are themselves subject to higher-order error. In practice, the framework recommends FB when accurate coverage is critical and EB only when (i) computational constraints dominate and (ii) the user accepts approximate coverage.
+
+---
+
+# **7. Theorem 7C: Finite-Sample Compound Decision Bound**
+
+> **Theorem 7C. Compound decision bound (Robbins-Efron).** Suppose the hierarchical model has $K$ exchangeable units with parameters $\xi_k$ drawn i.i.d. from a prior $\pi_\xi$ depending on $\theta_{\text{ref}}$ as a hyperparameter, and the goal is to estimate $\xi_k$ for each $k$. Let $\widehat{\xi}^{\text{EB}}_k$ be the EB estimator with $\widehat{\theta}_{\text{ref}}^{\text{EB}}$ plugged into the posterior mean, and $\widehat{\xi}^{\text{FB}}_k$ the FB estimator (joint posterior mean). Then:
+> $$\frac{1}{K} \sum_{k=1}^K \mathbb{E}\bigl[ (\widehat{\xi}^{\text{EB}}_k - \xi_k^*)^2 \bigr] \;\leq\; \frac{1}{K} \sum_{k=1}^K \mathbb{E}\bigl[ (\widehat{\xi}^{\text{FB}}_k - \xi_k^*)^2 \bigr] + B_K,$$
+> where the gap term satisfies
+> $$B_K \;\leq\; \frac{C_1}{K} \cdot \mathbb{E}\bigl[ (\widehat{\theta}_{\text{ref}}^{\text{EB}} - \theta_{\text{ref}}^*)^2 \bigr] \;\to\; 0 \quad \text{as } K \to \infty,$$
+> for an explicit constant $C_1$ depending on the sensitivity of the conditional posterior mean to $\theta_{\text{ref}}$.
+
+*Reference.* This is the standard compound decision result tracing back to Robbins (1956); see Efron (2019, Theorem 1.1) for the modern treatment and Brown (2008) for finite-sample bounds. The result says: when many parameters share a common hyperprior, **EB has nearly minimax risk under squared-error loss**, with the gap to FB shrinking as the number of exchangeable units $K$ grows.
+
+**Two regimes of practical use.**
+
+- **$K$ large** (many exchangeable units, e.g., a large hierarchical study with many groups): EB risk is essentially the same as FB risk; EB is the practical choice.
+- **$K$ small** (few groups, or non-exchangeable structure): the gap $B_K$ is non-negligible; FB is preferred to capture the variance of $\widehat{\theta}_{\text{ref}}$.
+
+**Caveat.** Theorem 7C is for **squared-error loss on point estimates**. For interval coverage (Proposition 7B), the picture changes: EB systematically under-covers regardless of $K$. The choice between EB and FB therefore depends on whether the user prioritizes point estimate accuracy (EB acceptable when $K$ is large) or coverage calibration (FB preferred).
+
+---
+
+# **8. Proposition 7D: Conditions under which EB and FB Differ Substantially**
+
+> **Proposition 7D.** EB and FB produce **substantially different posteriors** in any of the following regimes:
+>
+> (i) **Small effective sample size for $\theta_{\text{ref}}$.** When the marginal Fisher information $I_{\theta\theta}^{\text{marg}}$ at the posterior mode is small ---e.g., the upper-level parameter is poorly identified by the data--- the variance of $\widehat{\theta}_{\text{ref}}^{\text{EB}}$ is large, and FB's integration over this variance produces a substantially wider posterior on $\xi$.
+> (ii) **Strongly informative prior on $\theta_{\text{ref}}$.** When the prior $\pi_\Theta$ has narrow support around $\theta_{\text{ref}}^*$ (informative prior), FB benefits from the prior information whereas EB ignores it; the FB posterior is concentrated more tightly on $\xi$.
+> (iii) **Multimodal marginal likelihood for $\theta_{\text{ref}}$.** When $L_n^{\text{marg}}$ has multiple local maxima, the EB estimator may converge to a non-global mode; FB integrates over all modes weighted by the prior. The two posteriors differ qualitatively.
+> (iv) **Misspecified lower-level prior $\pi_\xi$.** When $\pi_\xi$ is misspecified, both EB and FB are affected, but the bias differs: EB optimizes $\theta_{\text{ref}}$ to compensate for the misspecified $\pi_\xi$ (a form of regularization that FB does not perform).
+
+In each of these regimes, the framework recommends FB by default, with EB only when justified by computational considerations and accompanied by the under-coverage correction of Proposition 7B.
+
+---
+
+# **9. When to Use EB vs FB: Recommendation by Scenario**
+
+The framework's operational recommendation:
+
+| Scenario | $n$ | $K$ (exchangeable units) | $I_{\theta\theta}^{\text{marg}}$ | Computational budget | Recommended | Reason |
+|:---------|:---:|:------------------------:|:-------------------------------:|:--------------------:|:-----------:|:-------|
+| Large dataset, many groups, well-identified upper level, tight compute | Large | Large | Large | Tight | **EB** | Theorem 7A equivalence; Theorem 7C bounds risk gap |
+| Same as above but coverage critical | Large | Large | Large | Tight | **FB** | Proposition 7B coverage discrepancy |
+| Small/moderate dataset, exchangeable structure | Moderate | Moderate | Moderate | Moderate | **FB** | Theorem 7C gap non-negligible; Proposition 7B coverage matters |
+| Few groups, non-exchangeable | Small | Small | Small | Any | **FB** | All four conditions of Proposition 7D may apply |
+| Multimodal $L_n^{\text{marg}}$ for $\theta_{\text{ref}}$ | Any | Any | Any | Any | **FB** | Proposition 7D (iii) |
+| Strong prior knowledge on $\theta_{\text{ref}}$ available | Any | Any | Any | Any | **FB** | Proposition 7D (ii) |
+| Highly hierarchical model (3+ levels) | Any | Any | Any | Any | **FB** | EB hyperparameter cascade compounds errors |
+
+The framework's **default is FB** via `gdpar()`. EB is available as a separate operational entry point `gdpar_eb()` for cases where the user has explicitly determined that EB is preferred; see vignette `vop07_eb_workflow` for the workflow and `v07b_eb_multivariate` for the multivariate extension of the theory.
+
+**Two situations where EB has clear methodological advantage** (independent of computation):
+
+(a) **Honest avoidance of prior assumptions on $\theta_{\text{ref}}$.** When no defensible prior on $\theta_{\text{ref}}$ is available and the user is uncomfortable with weakly informative priors that may inadvertently inject information, EB lets $\theta_{\text{ref}}$ be estimated from the data without the assumption. (FB requires a prior; EB does not.)
+
+(b) **Reproducibility and frequentist interpretability.** EB's $\widehat{\theta}_{\text{ref}}^{\text{EB}}$ is a deterministic function of the data; FB's posterior depends on the sampler's stochastic draws. For settings where reproducibility down to the bit-level matters or where a frequentist interpretation is sought, EB's deterministic point estimate is methodologically cleaner.
+
+---
+
+# **10. Open Questions**
+
+**(O1-EBFB) Adaptive choice between EB and FB based on data.** The framework's recommendation in §9 is rule-based on $n$, $K$, $I_{\theta\theta}^{\text{marg}}$. A **data-driven adaptive choice** ---a procedure that automatically selects EB or FB based on a diagnostic of the gap between the two--- is an open question. Partial work: Petrone, Rousseau, Scricciolo (2014, §7) discuss adaptive empirical Bayes. The adaptation to the AMM canonical form is not closed.
+
+**(O2-EBFB) Coverage correction for EB credible intervals.** Proposition 7B's coverage correction is approximate. Higher-order corrections (Edgeworth-type expansions; bootstrap calibration) for EB credible intervals in the AMM context are an open area. The current implementation uses the first-order $C_{g, \alpha} / n$ correction, with explicit acknowledgement that it is approximate.
+
+**(O3-EBFB) Behavior under model misspecification.** Both EB and FB asymptotic theory assume correct specification ((HOM)+(REG) of Block 2). Under misspecification, the EB estimator $\widehat{\theta}_{\text{ref}}^{\text{EB}}$ converges to the pseudo-true parameter (White 1982) and the FB posterior contracts to the same pseudo-true. **Whether EB or FB degrades more gracefully under misspecification** is an open question with practical relevance.
+
+**(O4-EBFB) Computational competitiveness of FB at moderate $n$.** Modern Hamiltonian Monte Carlo (Stan/cmdstanr) has narrowed the computational gap between EB and FB substantially. The framework's blanket recommendation of FB by default is calibrated to current compute capabilities; for very large $n$ or very high-dimensional $\xi$, EB may remain the only computationally feasible option. The threshold at which FB becomes infeasible is problem-dependent.
+
+---
+
+# **11. Implementation Implications for Path 1**
+
+The EB-vs-FB choice is operationally relevant primarily for **Path 1** (hierarchical Bayesian via Stan); Paths 2 and 3 have analogous but distinct treatments described briefly at the end.
+
+### **11.1. Path 1: Stan Configuration**
+
+The framework's `gdpar` Path 1 default is **FB**: $\theta_{\text{ref}}$ is included in the Stan model as a parameter with prior $\pi_\Theta$, and HMC samples the joint posterior. The user requests EB by calling `gdpar_eb()` instead of `gdpar()`. `gdpar_eb()` executes the canonical three-step EB recipe of Sub-fase 8.6 (decisions 2.1 + 2.2 of the Sub-fase 8.6 Charter):
+
+(i) First fit a marginal-likelihood maximization for $\widehat{\theta}_{\text{ref}}^{\text{EB}}$ via Laplace approximation (`cmdstanr::laplace()` with multi-start + Levenberg-Marquardt ridge + condition-number guard per Charter Section 2.8 anti-fragility strategy),
+(ii) Plug $\widehat{\theta}_{\text{ref}}^{\text{EB}}$ into a conditional Stan model that treats $\theta_{\text{ref}}$ as data,
+(iii) Sample the conditional posterior of $\xi$.
+
+The library reports EB credible intervals with the Proposition 7B inflation correction by default (argument `eb_correction = TRUE`); this is configurable.
+
+`gdpar_eb()` covers four path regimes, dispatched automatically from the resolved $(K, p)$ pair:
+
+- **Base regime** ($K = 1$, $p = 1$): Stan template pair `amm_eb_marginal.stan` + `amm_eb_conditional.stan` (Sub-phase 8.6.B). Scalar Proposition 7B correction.
+- **Path A** ($K = 1$, $p > 1$): Stan template pair `amm_eb_marginal_multi.stan` + `amm_eb_conditional_multi.stan` (Sub-phase 8.6.C decision D34). Matricial Proposition 7B\* correction (Section 5.1 of `vignette("v07b_eb_multivariate")`).
+- **Path B** ($K > 1$, $p = 1$): Stan template pair `amm_eb_marginal_K.stan` + `amm_eb_conditional_K.stan` (Sub-phase 8.6.C decision D34). Per-slot scalar Proposition 7B correction; the multi-parametric family dispatch follows Sub-phase 8.3.X distributional regression.
+- **Path C** ($K > 1$, $p > 1$): Stan template pair `amm_eb_marginal_KxP.stan` + `amm_eb_conditional_KxP.stan` (Sub-phase 8.6.D decisions D36 + D37 + D38'' + D40' + D43). Tensor Proposition 7B\* correction of shape $\mathbb{R}^{K \times p \times p}$ retaining all cross-coordinate terms within each slot. Coverage initial restricted to Gaussian $K = 2$ and Negative Binomial $K = 2$ per the numerical caveat of the Sub-phase 8.6.D opening Section 6.1; other Path B families are deferred to a later iteration of 8.6.D.
+
+The companion `gdpar_compare_eb_fb()` (Sub-phase 8.6.E) reports the operational verification of Theorem 7A (marginal TV between EB and FB lower-level posteriors) and Proposition 7B / 7B\* / 7B\* tensor (per-cell EB-vs-FB credible-interval width ratio).
+
+For the theoretical multivariate / multi-slot extension of Theorems 7A / 7C / Propositions 7B / 7D, see `vignette("v07b_eb_multivariate")`. For the operational workflow of `gdpar_eb()` and `gdpar_compare_eb_fb()` end to end across the four regimes, see `vignette("vop07_eb_workflow")`.
+
+### **11.2. Path 2: Penalty Parameter Selection (EB-like on a Different Object)**
+
+Path 2 (via `mgcv`) uses **marginal-likelihood-based smoothing-parameter selection (EB-like)** for the smoothing parameter $\widehat{\lambda}$ via REML: a marginal-likelihood maximization that integrates out the random-effect coefficients under their prior. **This is EB-like in spirit but operates on a different object than $\theta_{\text{ref}}$**: the smoothing parameter $\lambda$ controls the prior variance on the spline coefficients (a low-level regularization parameter), not the population reference $\theta_{\text{ref}}$ that anchors the AMM hierarchy in this block's discussion.
+
+The two should not be conflated:
+
+- The **EB vs. FB question of this block** is about how to estimate the **upper-level population reference** $\theta_{\text{ref}}$.
+- The **REML-based smoothing-parameter selection** of Path 2 is a separate, lower-level marginal-likelihood maximization on the spline penalty $\lambda$ that controls roughness of the smooth components $a, W$.
+
+For the upper-level $\theta_{\text{ref}}$ in Path 2 implementations, the framework's default treatment matches Block 7's recommendation: **FB by default** when $\theta_{\text{ref}}$ is part of the model with its own prior (typical mixed-effects spline setup); EB-style only if $\theta_{\text{ref}}$ is treated as a hyperparameter to be optimized via marginal likelihood (less common in practice for Path 2). FB-style alternatives for the smoothing parameter $\lambda$ itself (Bayesian smoothing parameter via MCMC) are available but slower and not the default. The EB-vs-FB asymptotic results of this block (Theorem 7A and Proposition 7B) apply to the upper-level $\theta_{\text{ref}}$ object; analogous but distinct results for REML-based smoothing-parameter selection at the spline level are treated in Block 5 (Proposition 5D and its caveats).
+
+### **11.3. Path 3: Variational Inference vs. Posterior Sampling**
+
+Path 3 (via `torch`) uses stochastic variational inference (SVI) by default, which does not have a clean EB/FB split: the variational posterior over network parameters $\phi$ implicitly integrates out the role of $\theta_{\text{ref}}$ if it is included in the variational family. The framework's Path 3 default treats $\theta_{\text{ref}}$ as part of the variational family (FB analog) but exposes an option to fix $\theta_{\text{ref}}$ at an EB estimate before variational fitting.
+
+### **11.4. (REG-EST) of Block 2 under EB and FB**
+
+Both EB and FB satisfy (REG-EST) of Block 2 under the hypotheses of Theorems 7A and 5A/4A respectively. Theorem 7A's first-order equivalence ensures that EB and FB-fitted individual parameters $\widehat{\theta}_i$ satisfy the same average-error consistency in the limit. The higher-order under-coverage of EB (Proposition 7B) does not affect (REG-EST) directly because (REG-EST) is about point-estimate consistency, not coverage.
+
+---
+
+# **12. Summary**
+
+This block has established for EB-vs-FB:
+
+1. **Three layers of comparison**: first-order asymptotic equivalence (L1), higher-order coverage discrepancy (L2), finite-sample compound decision bound (L3).
+
+2. **Standing hypotheses** (EB-MARG-ID), (PRIOR-FB-WEAK), (HIER-COMPLEX), nominated and connected to the asymptotic results.
+
+3. **Theorem 7A (First-Order Equivalence)**: under regularity, EB and FB posteriors over $\xi$ agree asymptotically in total variation distance, specializing Petrone-Rousseau-Scricciolo (2014) and Rousseau-Szabo (2017) to AMM.
+
+4. **Proposition 7B (Higher-Order Coverage)**: EB credible intervals under-cover by $n^{-1}$ relative to FB; explicit constant $C_{g, \alpha}$ tied to the second-order curvature of the functional.
+
+5. **Theorem 7C (Compound Decision Bound)**: under exchangeable structure with $K$ units, EB risk approaches FB risk as $K \to \infty$ (Robbins-Efron framework).
+
+6. **Proposition 7D**: four explicit conditions under which EB and FB differ substantially, with framework recommendation of FB in each.
+
+7. **Recommendation by scenario** (§9) with seven rows covering common cases, plus two methodological situations where EB has independent advantage.
+
+8. **Four open questions** on adaptive EB-FB choice, coverage corrections, misspecification behavior, and computational thresholds.
+
+9. **Implementation diagnostics** for Path 1 (default FB, EB available with inflation correction), Path 2 (default EB-style via REML), and Path 3 (default FB-analog via SVI with EB option).
+
+The framework's **default is FB** for Path 1 because: (i) coverage calibration matters for inference; (ii) modern HMC has narrowed the computational gap; (iii) FB's integration over $\theta_{\text{ref}}$ is the more honest treatment when $\theta_{\text{ref}}$ is a parameter to be estimated from data. EB is available as an explicit configuration option for cases where the user has determined it is preferred (computational constraints, methodological avoidance of priors on $\theta_{\text{ref}}$, or large-$K$ exchangeable settings).
+
+---
+
+# **13. Connections to Subsequent Blocks**
+
+- **`vignette("v07b_eb_multivariate")`** — multivariate / multi-slot extension of this block: Theorem 7A\* extending Theorem 7A to $\theta_{\text{ref}} \in \mathbb{R}^p$, Proposition 7B\* extending the coverage discrepancy to a matricial form, Theorem 7C\* compound multi-slot extending the compound decision bound to $K > 1$, Proposition 7D\* extending the four discrepancy conditions, open question O5\*-EBFB on the anti-fragility of the Laplace Hessian under $p > 1$ and $K > 1$. The companion canonical vignette of Sub-fase 8.6.A.
+- **`vignette("vop07_eb_workflow")`** — operational recipe for `gdpar_eb()` end to end across the four path regimes ($K = 1 + p = 1$, Path A, Path B, Path C), the numerical diagnostics ($\kappa(H)$, LM ridge, multi-start dispersion), the EB-vs-FB comparison via `gdpar_compare_eb_fb()`, and the troubleshooting recipes for ill-conditioned Hessians and conditional-HMC instability under logit-strict links. The companion operational vignette of Sub-fase 8.6.E.
+- **Block 8** (CATE/ITE positioning) uses the EB-vs-FB distinction in the context of heterogeneous treatment effect estimators: many CATE estimators (BART, causal forests with EB shrinkage) are implicitly EB-style, with the corresponding under-coverage of Proposition 7B applying. The framework's positioning relative to these estimators inherits the EB-vs-FB discussion.
+- **Block 9** (cognitive motivation) interacts with this block at the level of **how the framework treats prior knowledge**: FB explicitly uses a prior $\pi_\Theta$ on the population reference, which has a natural interpretation as the analyst's prior expectation about the population (e.g., the cognitive analogy's "average driver" is the prior's central value). EB is an honest avoidance of this assumption.
+
+---
+
+# **Appendix A. EB-vs-FB Notation**
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $\theta_{\text{ref}}$ | Population reference (upper-level parameter) |
+| $\xi = (a, b, W)$ | Lower-level parameters |
+| $\pi_\Theta, \pi_\xi$ | Priors on upper- and lower-level |
+| $L_n^{\text{marg}}(\theta_{\text{ref}})$ | Marginal likelihood of $\theta_{\text{ref}}$ |
+| $\widehat{\theta}_{\text{ref}}^{\text{EB}}$ | EB estimator (Type II ML) |
+| $\Pi_n^{\text{EB}}, \Pi_n^{\text{FB}}$ | EB and FB posteriors over $\xi$ |
+| $d_{\text{TV}}$ | Total variation distance |
+| $I_{\theta\theta}^{\text{marg}}$ | Fisher info of marginal likelihood at $\theta_{\text{ref}}^*$ |
+| $C_{g, \alpha}$ | Coverage discrepancy constant in Proposition 7B |
+| $K$ | Number of exchangeable units in compound decision |
+| $B_K$ | Risk gap term in Theorem 7C |
+
+---
+
+# **Appendix B. EB-vs-FB Hypothesis Table**
+
+| Hypothesis | Content | Used by |
+|:-----------|:--------|:--------|
+| (EB-MARG-ID) | Marginal likelihood has unique maximum with non-singular $I_{\theta\theta}^{\text{marg}}$ | Theorems 7A, 7B, 7C |
+| (PRIOR-FB-WEAK) | $\mathrm{Var}_n(\theta_{\text{ref}}^*) / \mathrm{Var}_\pi(\theta_{\text{ref}}) \to 0$ | Theorem 7A |
+| (HIER-COMPLEX) | Bounded number of upper-level hyperparameters as $n$ grows | Theorem 7A |
+
+---
+
+# **References Cited in This Block**
+
+Bickel, P. J., and Ghosh, J. K. (1990). A decomposition for the likelihood ratio statistic and the Bartlett correction --- a Bayesian argument. *Annals of Statistics*, 18(3), 1070--1090.
+
+Brown, L. D. (2008). In-season prediction of batting averages: a field test of empirical Bayes and Bayes methodologies. *Annals of Applied Statistics*, 2(1), 113--152.
+
+Carlin, B. P., and Gelfand, A. E. (1990). Approaches for empirical Bayes confidence intervals. *Journal of the American Statistical Association*, 85(409), 105--114.
+
+Casella, G. (1985). An introduction to empirical Bayes data analysis. *American Statistician*, 39(2), 83--87.
+
+Efron, B. (2019). Bayes, oracle Bayes, and empirical Bayes. *Statistical Science*, 34(2), 177--201.
+
+Efron, B., and Morris, C. (1973). Stein's estimation rule and its competitors: an empirical Bayes approach. *Journal of the American Statistical Association*, 68(341), 117--130.
+
+Laird, N. M., and Louis, T. A. (1987). Empirical Bayes confidence intervals based on bootstrap samples. *Journal of the American Statistical Association*, 82(399), 739--750.
+
+Petrone, S., Rousseau, J., and Scricciolo, C. (2014). Bayes and empirical Bayes: do they merge? *Biometrika*, 101(2), 285--302.
+
+Robbins, H. (1956). An empirical Bayes approach to statistics. *Proceedings of the Third Berkeley Symposium on Mathematical Statistics and Probability*, vol. 1, 157--163.
+
+Rousseau, J., and Szabo, B. (2017). Asymptotic behaviour of the empirical Bayes posteriors associated to maximum marginal likelihood estimator. *Annals of Statistics*, 45(2), 833--865.
+
+Szabo, B., van der Vaart, A. W., and van Zanten, J. H. (2013). Empirical Bayes scaling of Gaussian priors in the white noise model. *Electronic Journal of Statistics*, 7, 991--1018.
+
+White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1--25.

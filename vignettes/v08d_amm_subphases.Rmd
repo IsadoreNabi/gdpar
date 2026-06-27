@@ -1,0 +1,403 @@
+---
+title: "**Theoretical Addendum -- Block 8 (Sub-phases 8.3.1--8.3.10):**"
+subtitle: "Per-Slot Parametric Resolution, Identifiability under Heterogeneity, Custom Families, $K \\geq 1$ Distributional Slots, Mixtures and Hurdles, B-spline Basis, Residual Diagnostics, and S3 Methods"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{AMM Sub-phases 8.3.1 to 8.3.10 -- Theoretical Canonization}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+---
+
+# **1. Purpose and Relation to the v08* Family**
+
+The Block 8 vignette family canonizes the AMM extensions that live around but outside the Block 1 core (Asymmetric Multiplicative Model with $\theta_i = \theta_{\mathrm{ref}} + \Delta(x_i, \theta_{\mathrm{ref}})$ and scalar-slot Gaussian response):
+
+- **v08** positions AMM relative to the CATE / ITE literature (Block 8 conceptual frame).
+- **v08b** implements the causal bridge T-learner standalone (Sub-phase 8.5.A).
+- **v08c** introduces the meta-learner comparator as an external bench (Sub-phase 8.5.B).
+- **This vignette (v08d)** canonizes the *internal* per-slot parametric extension of AMM, summarized as Sub-phases 8.3.1 to 8.3.10 of the development log.
+
+The decisions canonized here previously lived only in development handoffs and project memories. The release-gate of Sub-phase 8.3.10 (development version `0.0.0.9001`) closed the corresponding R-side and Stan-side implementation cycle, but the *theoretical* canonization — what each sub-phase decided, why, and how it composes with the others — was deferred to this addendum.
+
+The structure follows the three-layer rigor standard used throughout the gdpar documentation:
+
+- **(L1) Algebraic / structural.** What the per-slot architecture *is*: $K$ distributional slots, $K \geq 1$, each carrying its own family, link, parameter set, and identifiability constraint.
+- **(L2) Statistical.** What it means to fit a model with $K \geq 1$ heterogeneous slots (priors, sampling, posterior identifiability).
+- **(L3) Numerical / operational.** How the codegen, the per-slot inverse-link dispatch, the B-spline basis dispatch, and the residual diagnostics actually compose in `R/` and `inst/stan/`.
+
+This vignette does not claim the per-slot architecture is unique or novel. The design choices are documented for auditability (what was decided, with which alternatives present, under which constraint).
+
+---
+
+# **2. Setting and Notation**
+
+## **2.1. AMM with $K \geq 1$ Distributional Slots**
+
+Let the response $Y_i \in \mathcal{Y}$ for observation $i = 1, \dots, n$ follow a conditional law indexed by a $K$-tuple of slot parameters:
+
+$$Y_i \mid X_i \;\sim\; \mathcal{D}\bigl(\eta_{i,1}, \dots, \eta_{i,K}\bigr),$$
+
+where each slot index $k \in \{1, \dots, K\}$ carries its own *natural* (linear-predictor) scale $\eta_{i,k} \in \mathbb{R}$, its own *response* (parameter) scale $\theta_{i,k} = g_k^{-1}(\eta_{i,k})$ under an inverse-link $g_k^{-1}$, and its own AMM decomposition:
+
+$$\eta_{i,k} \;=\; \eta_{\mathrm{ref}, k} \;+\; \Delta_k(x_i, \eta_{\mathrm{ref}, k}),$$
+
+with $\eta_{\mathrm{ref}, k}$ the per-slot population reference and $\Delta_k$ the per-slot AMM deviation. The scalar single-slot case $K = 1$ recovers the canonical Block 1 setup; this is enforced as a corollary in §3.
+
+The multivariate-reference dimension $p$ (Sub-phase 8.6.A) is orthogonal to $K$: $p$ enumerates the components of $\theta_{\mathrm{ref}}$ that an *anchored hierarchical* prior pools across grouping levels, whereas $K$ enumerates the slots of the *response distribution*. The full $(p \geq 1, K \geq 1)$ regime — including the $p > 1 \wedge K > 1$ Path C — is treated in v07b and v08; the present vignette focuses on the $K$-axis.
+
+## **2.2. Slot Conventions**
+
+The framework's slot convention is positional, mirroring the parameter order of the underlying density:
+
+- **Gaussian ($K = 2$):** slot 1 = `mu` (identity link), slot 2 = `sigma` (log link).
+- **Poisson / NB ($K = 1$ or $K = 2$):** slot 1 = `mu` (log link); for NB, slot 2 = `phi` (log link).
+- **Beta ($K = 2$):** slot 1 = `mu` (logit link, support $(0,1)$), slot 2 = `phi` (log link, precision).
+- **Gamma ($K = 2$):** slot 1 = `mu` (log link), slot 2 = `phi` (log link, shape under mean-shape parametrization).
+- **Student-$t$ ($K = 3$):** slot 1 = `mu` (identity), slot 2 = `sigma` (log), slot 3 = `nu` (log).
+- **Tweedie ($K = 3$):** slot 1 = `mu` (log), slot 2 = `phi` (log), slot 3 = `p` (identity, bounded $(1.01, 1.99)$).
+- **ZIP / Hurdle-Poisson ($K = 2$):** slot 1 = `mu` (log), slot 2 = `pi` (logit).
+- **ZINB / Hurdle-NB ($K = 3$):** slot 1 = `mu` (log), slot 2 = `phi` (log), slot 3 = `pi` (logit).
+
+The per-slot conventions are not arbitrary: each link is the canonical link for the corresponding scale (location-on-real, scale-on-positive, probability-on-unit-interval), and the framework's residual diagnostics (G1 / G2 / G3 of Sub-phase 8.3.9) rely on this convention for unit-coherent contributions.
+
+---
+
+# **3. Sub-phase 8.3.1 -- `param_specs` as the Per-Slot Resolution Layer**
+
+The release-gate of Sub-phase 8.3 (Decision 1C, canonized in Session 1) introduces an internal data structure named `param_specs`: a list of length $K$ whose $k$-th element is a `gdpar_param_spec` object recording, for slot $k$:
+
+- the name of the parameter (e.g., `"mu"`, `"sigma"`, `"phi"`, `"nu"`, `"p"`, `"pi"`),
+- the link function and its inverse (canonical, dispatched by name),
+- the integer `link_id` used by the Stan helper `apply_inv_link_by_id` (Sub-phase 8.3.7; see §9),
+- the support of the parameter on the response scale (e.g., $\mathbb{R}$, $\mathbb{R}_+$, $(0, 1)$, $(1.01, 1.99)$),
+- a default weakly-informative prior block written in Stan as `THETA_REF_PRIOR_BLOCK` (per-family slot expansion; see §7),
+- the minimum admissible $K$ for the family (e.g., $K_{\min} = 2$ for Gaussian, $K_{\min} = 3$ for Student-$t$ or Tweedie).
+
+`param_specs` replaces what previous iterations carried as scattered per-family `switch`-statements in the codegen and as ad-hoc per-slot hyperparameter blocks in the Stan template. The resolution layer is *single-source-of-truth*: any addition of a new family (whether built-in or custom; see §5) extends `param_specs` and the codegen consumes the extension uniformly.
+
+The structural alternative considered (Session 1) was to keep per-family branches in the codegen and let each branch own its slot layout. That alternative was rejected on the ground that it scales as $O(\text{families})$ in maintenance burden and as $O(\text{families} \times K_{\max})$ in code-path duplication; `param_specs` scales as $O(\text{families})$ in data and as $O(1)$ in code paths.
+
+The `param_specs` object is exposed in the public S3 print methods (`print.gdpar_param_spec`) for diagnostic use and is returned as part of `print.gdpar_fit` summaries when `level = "spec"` is requested.
+
+---
+
+# **4. Sub-phase 8.3.2 -- The (D-ID) Per-Slot Identifiability Check (4C)**
+
+Sub-phase 8.3.2 introduced the per-slot identifiability check **(D-ID)** as a three-layer guard:
+
+- **(D-ID layer 1, algebraic.)** For each slot $k$, the parameter $\theta_{i,k}$ must be uniquely determined by the per-slot natural parameter $\eta_{i,k}$ via the canonical link $g_k$. This is a property of the family, not of the dataset: it is verified at design time by the family's `did_layer1` field (a logical scalar; default `TRUE`).
+- **(D-ID layer 2, statistical.)** For each slot $k$, the empirical design $Z_k$ (the per-slot covariate matrix) must satisfy a per-slot rank condition: $\mathrm{rank}(Z_k) = \mathrm{ncol}(Z_k)$ over the active grouping level. The check is performed pre-fit in `R/check_identifiability.R::.check_per_slot_rank` and reported by `gdpar_check_identifiability(rigor = "full")`.
+- **(D-ID layer 3, numerical / posterior.)** For each slot $k$, the marginal posterior of the slot coefficients must concentrate (verified post-fit by `gdpar_bvm_check` and the contraction diagnostic of `gdpar_contraction_diagnostic`).
+
+The release-gate decision is that **(D-ID) is run per slot, not pooled**: a Gaussian fit with $K = 2$ where slot 1 (`mu`) is identifiable but slot 2 (`sigma`) is collinear under the active grouping is flagged at slot 2, not at the fit as a whole. This per-slot granularity is structurally necessary under Sub-phase 8.3.7 heterogeneity (different families per slot impose different (D-ID) checks per slot) and is preserved across all subsequent sub-phases.
+
+The `did_override` parameter of `gdpar_family()` admits family-side plasticity. When a custom family violates a default `(D-ID layer 1)` assumption — for example, when introducing a new link with non-standard monotonicity — the user can override the default via `did_override = function(slot_idx, family_spec) {...}` and supply a slot-specific check. This was introduced in Sub-phase 8.3.5a to avoid duplicating the entire family registry for the Student-$t$ extension.
+
+---
+
+# **5. Sub-phase 8.3.4 -- Custom Families and `lognormal_loc_scale`**
+
+Sub-phase 8.3.4 introduced the **(D-A3.B) custom-family descriptor pattern**: the public function `gdpar_family_custom_K(stan_lpdf_id, links, supports, min_K, ...)` constructs a `gdpar_family` object from a descriptor whose Stan-side log-density is identified by `stan_lpdf_id` and whose R-side metadata mirrors the built-in registry. The descriptor pattern subsumes the previous `gdpar_family_custom()` (single slot) by reading $K$ from the user-supplied `min_K` and dispatching the per-slot links via the same mechanism as built-in families.
+
+Three concrete consequences:
+
+- **`lognormal_loc_scale`** is the canonical example of a family that is *only* accessible via `gdpar_family_custom_K(stan_lpdf_id = "lognormal_loc_scale", ...)`: it is not exposed through `gdpar_family(name)` because the framework's enumerated registry treats it as a custom-family example (the Stan-side `lognormal_loc_scale` lpdf lives in `inst/stan/amm_distrib_K.stan`, and the R-side metadata is in `R/families.R::.gdpar_family_lognormal_loc_scale_K`). The custom-family path documents how new families can be added without touching the built-in registry; `lognormal_loc_scale` itself was added during Sub-phase 8.3.4 to validate the pattern end-to-end.
+- **Beta ($K = 2$, `stan_id = 5`)** and **Gamma ($K = 2$, `stan_id = 6`)** were added as built-in $K = 2$ families using the same descriptor mechanism internally, with mean-parametrized lpdfs and the canonical logit / log link decomposition.
+- **D-B1 / D-B2 / D-B3 normalization (Sub-phase 8.3.4):** the Stan-side wires the slot parameters via `apply_inv_link_by_id` (see §9 for the helper) and the R-side wires the `link_id` integer (1 = identity, 2 = log, 3 = logit, 4 = bounded-identity-Tweedie, etc.).
+- **D-A2 cleanup (Sub-phase 8.3.4):** the previously inconsistent `family_name` slot of `gdpar_fit` was harmonized to dispatch through `param_specs[[k]]$family_name` per slot, eliminating the ambiguity that arose under future heterogeneity (Sub-phase 8.3.7).
+
+The custom-family descriptor pattern is reused in Sub-phase 8.3.5a and 8.3.5b without further structural changes.
+
+---
+
+# **6. Sub-phase 8.3.5a -- Student-$t$ ($K = 3$, `stan_id = 8`)**
+
+The Student-$t$ family ($K = 3$) was added in Sub-phase 8.3.5a with slots `(mu, sigma, nu)` under links `(identity, log, log)`. The lpdf is the standard location-scale Student-$t$ density (`student_t_lpdf` in Stan) with the slot-$3$ `nu` interpreted as the degrees-of-freedom parameter.
+
+The sub-phase emerged the `did_override` mechanism described in §4: the (D-ID layer 1) default for `nu` (positive real, log link) was correct for the family, but the registry needed a per-family table of minimum $K$ values (`min_K = 3` for Student-$t$) to gate the public API. The helper `.gdpar_guard_K_below_family_min` was renamed from a session-local name to its current canonical form to make the gate explicit.
+
+The release-gate of 8.3.5a (Session 16 of Block 8.3) was a non-trivial test of the per-slot architecture under $K > 2$: the codegen had to expand `THETA_REF_PRIOR_BLOCK` over three slots instead of two, and the residual diagnostics (introduced later in Sub-phase 8.3.9) had to compose with a three-slot inverse-link dispatch. The test passed (suite delta `+86 PASS / 0 FAIL / +1 SKIP` for the Stan-gated smoke); the registry entry for `stan_id = 8` is canonical from that session forward.
+
+---
+
+# **7. Sub-phase 8.3.5b -- Tweedie ($K = 3$, `stan_id = 9`)**
+
+The Tweedie family ($K = 3$) was added in Sub-phase 8.3.5b with slots `(mu, phi, p)` under links `(log, log, identity-bounded-on-(1.01, 1.99))`. The bounded-identity link on slot 3 is necessary because the Tweedie exponent $p$ has a known degenerate behaviour at $p = 1$ (Poisson limit) and $p = 2$ (Gamma limit); the bounded interval excludes both degeneracies while preserving the continuous compound-Poisson regime.
+
+## **7.1. Hybrid lpdf: Dunn-Smyth series + saddlepoint**
+
+The Tweedie density for $1 < p < 2$ has no closed-form expression. The framework's Stan-side implementation uses a **hybrid** of two complementary approximations:
+
+- **Dunn-Smyth series.** For $1 < p < 2$, the density at $y > 0$ admits the series representation
+$$f(y \mid \mu, \phi, p) \;=\; \frac{1}{y} \sum_{j=1}^{\infty} W_j(y, \phi, p), \qquad W_j(y, \phi, p) = \frac{y^{-j\alpha} (p - 1)^{j\alpha}}{\phi^{j(1-\alpha)} (2 - p)^{j} j! \Gamma(-j\alpha)},$$
+where $\alpha = (2 - p) / (1 - p) \in (-\infty, 0)$. The series converges for all $(y, \mu, \phi, p)$ in the admissible region but converges slowly when $\phi$ is small or $y / \mu$ is large.
+
+- **Saddlepoint approximation.** When the Dunn-Smyth series converges slowly, the saddlepoint approximation provides high accuracy:
+$$f(y \mid \mu, \phi, p) \;\approx\; \frac{1}{\sqrt{2 \pi \phi y^{p}}} \exp\!\left(-\frac{(y - \mu)^{2}}{2 \phi y \mu^{p-1}}\right).$$
+The saddlepoint is essentially exact in the regime where the series struggles, which is precisely the high-$y / \mu$ tail.
+
+The cut-over between the two approximations is implicit (Decision D5 of 8.3.5b): the function selects the series at moderate $y / \mu$ and falls back to the saddlepoint otherwise, with the threshold derived from the Stan-side numerical tolerance rather than from a user-tunable parameter. The decision rationale is that exposing the threshold would invite mis-specification (users would tune it on a per-fit basis without principled grounds); the implicit hybrid is conservative in both regimes.
+
+## **7.2. `THETA_REF_PRIOR_BLOCK` per-family expansion**
+
+Decision E7 of Sub-phase 8.3.5b introduced `THETA_REF_PRIOR_BLOCK` as a **per-family placeholder** in the Stan template, expanded at codegen time according to the slot's link and support:
+
+- **Tweedie slot 1 (`mu`, log link, $\mathbb{R}_+$):** weakly-informative log-normal prior centered at $\log(\bar{y})$ (the empirical log-mean of the response), with scale 1.
+- **Tweedie slot 2 (`phi`, log link, $\mathbb{R}_+$):** weakly-informative half-normal prior on the log-scale with scale 1.
+- **Tweedie slot 3 (`p`, bounded-identity, $(1.01, 1.99)$):** uniform prior on the bounded interval.
+
+The placeholder mechanism is uniform across all built-in families: each family's `param_specs[[k]]$theta_ref_prior_block` field carries the slot-specific prior expansion as a literal Stan code chunk, and the codegen splices it into the model block at compile time. The mechanism is reused unchanged in Sub-phases 8.3.6 and 8.3.7.
+
+## **7.3. Initial-value helper**
+
+The release-gate of 8.3.5b also introduced a per-family **initial-value helper** for the Stan optimizer / sampler. Tweedie's slot 3 requires an initial value strictly inside the bounded interval (a naive zero-initialization fails because $p = 0 \notin (1.01, 1.99)$). The helper `gdpar:::.tweedie_init_p` returns a stratified initial value (default: the midpoint $1.5$ jittered by $\mathrm{Uniform}(-0.1, 0.1)$ per chain). The mechanism is exposed via the `init` argument of `gdpar()` for any family that needs it; users who want to control initialization explicitly can pass a list of per-chain initial values.
+
+---
+
+# **8. Sub-phase 8.3.6 -- Mixtures and Hurdle Models**
+
+Sub-phase 8.3.6 added four mixture / hurdle families:
+
+| Family             | $K$ | `stan_id` | Slot 1     | Slot 2          | Slot 3        |
+|--------------------|-----|-----------|------------|-----------------|---------------|
+| ZIP                | 2   | 10        | `mu` (log) | `pi` (logit)    | --            |
+| ZINB               | 3   | 11        | `mu` (log) | `phi` (log)     | `pi` (logit)  |
+| Hurdle-Poisson     | 2   | 12        | `mu` (log) | `pi` (logit)    | --            |
+| Hurdle-NB          | 3   | 13        | `mu` (log) | `phi` (log)     | `pi` (logit)  |
+
+## **8.1. Algebraic decompositions**
+
+The four families' log-densities decompose as follows. Let $\mu_i = \exp(\eta_{i,1})$ denote the count-process mean, $\phi_i = \exp(\eta_{i,2})$ (for NB-based families) the dispersion, and $\pi_i$ the slot-$K$ inflation / hurdle probability on the unit-interval scale.
+
+- **ZIP.** $\Pr(Y_i = y \mid \mu_i, \pi_i) = \pi_i \cdot \mathbf{1}\{y = 0\} + (1 - \pi_i) \cdot \mathrm{Poisson}(y \mid \mu_i)$. The log-density at $y_i$ is
+$$\log p(y_i) = \begin{cases} \log\bigl(\pi_i + (1 - \pi_i) \exp(-\mu_i)\bigr), & y_i = 0, \\ \log(1 - \pi_i) + y_i \log \mu_i - \mu_i - \log y_i!, & y_i > 0. \end{cases}$$
+The Stan-side implementation uses `log_mix(pi, 0, poisson_log_lpmf(0 | log_mu))` for the zero case and `log1m(pi) + poisson_log_lpmf(y | log_mu)` for the positive case.
+
+- **ZINB.** Replace $\mathrm{Poisson}(y \mid \mu_i)$ by $\mathrm{NB}(y \mid \mu_i, \phi_i)$ in the ZIP decomposition. The Stan-side uses `neg_binomial_2_log_lpmf` instead of `poisson_log_lpmf`; the rest of the structure is identical.
+
+- **Hurdle-Poisson.** The hurdle parametrization separates the zero process from the positive-count process:
+$$\Pr(Y_i = y \mid \mu_i, \pi_i) = \begin{cases} \pi_i, & y_i = 0, \\ (1 - \pi_i) \cdot \dfrac{\mathrm{Poisson}(y \mid \mu_i)}{1 - \exp(-\mu_i)}, & y_i > 0. \end{cases}$$
+The truncation factor $1 - \exp(-\mu_i)$ in the denominator normalizes the positive-count distribution to integrate to one on the positive integers. In log-space, $\log\bigl(1 - \exp(-\mu_i)\bigr) = \mathtt{log1m\_exp}(-\mu_i) = \mathtt{log1m\_exp}\bigl(\mathtt{poisson\_log\_lpmf}(0 \mid \log \mu_i)\bigr)$.
+
+- **Hurdle-NB.** Replace the Poisson zero-probability $\exp(-\mu_i)$ by the NB zero-probability $\bigl(\phi_i / (\phi_i + \mu_i)\bigr)^{\phi_i}$ (or equivalently `neg_binomial_2_log_lpmf(0 | log_mu, phi)` in log-space). The hurdle truncation factor and the per-observation log-density compose identically to Hurdle-Poisson otherwise.
+
+## **8.2. Structural decisions**
+
+- **(8.3.6 D1) Stan-side log-density via `target +=`.** The mixture / hurdle lpdfs are not built-in to Stan as single function calls; they require the explicit decomposition above. The decomposition is written as `target += ...` in the model block rather than as a custom `_lpdf` function, because Stan's built-in vectorized lpdfs for `poisson_log` and `neg_binomial_2_log` are used as building blocks and the mixture structure is composed at the model-block level.
+- **(8.3.6 D2) Hurdle truncated-at-one via `log1m_exp`.** The hurdle-component conditional (positive count given $> 0$) requires the truncation factor $1 - \Pr(Y = 0)$, computed in log-space as `log1m_exp(...)` to avoid underflow when $\mu_i$ is large. The Hurdle parametrization treats $\pi$ as the probability of the zero outcome (not as a mixture weight on the zero component), preserving the orthogonality between the zero-process and the count-process that distinguishes hurdle from zero-inflation.
+- **(8.3.6 D6 = a, non-generalization)** The placeholder `THETA_REF_PRIOR_BLOCK` of §7 *does not* generalize automatically to the mixture / hurdle case: the zero-inflation / hurdle slot `pi` (logit link, support $(0, 1)$) receives a Beta-prior block written *as a literal expansion* in the per-family template rather than via the helper. This was an explicit decision (D6 = a) to avoid coupling the placeholder mechanism to the mixture-component algebra; the placeholder remains the canonical mechanism for continuous-link slots.
+
+## **8.3. Deferred cases**
+
+The **Hurdle-continuous families** (Hurdle-Gamma, Hurdle-Lognormal) and the **$K < K_{\min}$ degenerate case** (e.g., a user supplying `K = 1` for ZIP, in which case the inflation slot is absent) were deferred to a future sub-phase as out-of-scope for 8.3.6. The guard `.gdpar_guard_K_below_family_min` rejects $K < K_{\min}$ configurations at the public API level.
+
+---
+
+# **9. Sub-phase 8.3.7 -- Heterogeneous Families per Slot**
+
+Sub-phase 8.3.7 introduced **heterogeneous families per slot**: a single fit in which slot 1 uses one family and slot 2 uses another (e.g., Beta in slot 1 + Gamma in slot 2, both $K = 2$). The public API takes a *named list* in the `family` argument: `gdpar(y ~ x, family = list(slot1 = gdpar_family("beta", K = 2), slot2 = gdpar_family("gamma", K = 2)))`. The flat-family API (`family = gdpar_family("gaussian", K = 2)`) is preserved as a corollary.
+
+The architectural alpha-decision (L1, refined in Sub-phase 8.3.7) is that **heterogeneity is per slot, not per coordinate**: under multivariate $\theta_{\mathrm{ref}} \in \mathbb{R}^p$ (Sub-phase 8.6.A), the slot-$k$ family applies uniformly across the $p$ coordinates of slot $k$. The per-coordinate heterogeneity (different families across the $p$ axis within a slot) was considered and rejected on identifiability grounds: the per-coordinate decomposition $\theta_{\mathrm{ref}, k} \in \mathbb{R}^p$ requires a coherent prior structure across coordinates, and mixing families across coordinates within a slot fragments that coherence.
+
+The implementation introduces two Stan-side conveniences:
+
+- **`apply_inv_link_by_id(link_id, eta)`** (data-block integer dispatch). The helper, defined at the top of `inst/stan/amm_distrib_K.stan`, takes a `link_id` integer and a real `eta`, returning the inverse-link-applied response-scale parameter. The dispatch is `if (link_id == 1) identity; else if (link_id == 2) exp; else if (link_id == 3) inv_logit; else if (link_id == 4) bounded_identity_tweedie; else reject`. The Stan-side `inv_link_id_per_slot` data field is a length-$K$ integer array that codegen populates at compile time.
+- **`apply_W_basis_diff(W_type_id, ...)`** (Sub-phase 8.3.8 sibling). The same integer-dispatch pattern is reused for the per-slot W-basis dispatch; see §10.
+
+The release-gate guard rejects $K \geq 3$ heterogeneous configurations (e.g., heterogeneous over three slots) as out-of-scope for 8.3.7. Five $K = 2$ branches were refactored to the named-list API: `stan_id` 1 (Gaussian), 3 (NB), 5 (Beta), 6 (Gamma), 7 (custom-via-lognormal-loc-scale).
+
+The **bit-exactness preservation** at the release-gate is structurally non-trivial: the goldens for $K = 2$ Beta + Gamma (from Sub-phase 8.3.4) had to be preserved bit-exact under the refactor (no re-bootstrap). The audit-compare path (`gdpar_compare_eb_fb`) registered zero FAIL on the bit-exact compare for the refactored families.
+
+---
+
+# **10. Sub-phase 8.3.8 -- B-spline W Basis (D-D3)**
+
+Sub-phase 8.3.8 introduced the **B-spline W basis** as a canonical alternative to the polynomial W basis previously used in the AMM linear predictor. Six decisions canonized:
+
+- **(D1) Alcance A: B-spline canonical.** The B-spline basis is added as a *first-class* W-basis option (not a custom-only extension). The polynomial basis remains canonical for the scalar single-slot case; the B-spline becomes canonical for the multi-knot non-polynomial case.
+- **(D2) Stan-side Cox-de Boor recurrence.** The Stan-side evaluation of the B-spline basis uses the Cox-de Boor recurrence (rather than a precomputed design matrix passed as data), because the basis must be evaluated at the per-slot inverse-link-transformed natural parameter at every iteration, and pre-computing the design at every iteration is wasteful when the recurrence is cheap.
+- **(D3) Signature `W_basis(x, type, degree, knots, boundary_knots)`.** The R-side public constructor takes the explicit boundary knots and a default `degree = 3` (cubic B-spline). The default cubic was chosen because it is the lowest degree under which the second derivative is continuous (a property needed by the Sub-phase 8.3.9 residuals; see §11).
+- **(D4) R-side strict, Stan-side liberal.** The R-side `W_basis` constructor validates the inputs strictly (knot monotonicity, boundary inclusion, degree $\geq 0$); the Stan-side accepts whatever the R-side passes without re-validating, on the assumption that the R-side is the single source of truth.
+- **(D5) Helper `apply_W_basis_diff` (Sub-phase 8.3.7 pattern).** The Stan-side helper `apply_W_basis_diff(W_type_id, ...)` replicates the integer-dispatch pattern of `apply_inv_link_by_id` (see §9). The dispatch is `if (W_type_id == 1) polynomial; else if (W_type_id == 2) bspline; else reject`. The dispatch is per slot, mirroring the per-slot family heterogeneity of Sub-phase 8.3.7.
+- **(D6) Three smokes gated + goldens deferred.** Three integration smokes were added under environment-variable gates (`GDPAR_RUN_STAN_SMOKE_BSPLINE=1`); the corresponding goldens were deferred to Sub-phase 8.3.9 (bootstrapped roster) to avoid duplicating the bootstrap effort across two sub-phases.
+
+A side-effect of the refactor: the Stan-side `W_is_polynomial` boolean data field was *eliminated* and replaced by the `W_type_id` integer. The elimination is canonical and the field does not return.
+
+## **10.1. Cox-de Boor recurrence (D2 detailed)**
+
+Given a non-decreasing knot vector $\boldsymbol{\tau} = (\tau_0 \leq \tau_1 \leq \dots \leq \tau_{m})$ and degree $d \geq 0$, the B-spline basis functions $B_{j, d}(x)$ for $j = 0, \dots, m - d - 1$ are defined by the Cox-de Boor recurrence:
+
+$$B_{j, 0}(x) \;=\; \begin{cases} 1, & \tau_j \leq x < \tau_{j+1}, \\ 0, & \text{otherwise}, \end{cases}$$
+
+$$B_{j, d}(x) \;=\; \frac{x - \tau_j}{\tau_{j+d} - \tau_j} B_{j, d-1}(x) \;+\; \frac{\tau_{j+d+1} - x}{\tau_{j+d+1} - \tau_{j+1}} B_{j+1, d-1}(x),$$
+
+with the convention $0/0 = 0$ for the boundary fractions when consecutive knots coincide. For the default cubic case ($d = 3$), the recurrence evaluates 4 basis function values at each $x$ (the non-zero ones overlapping the active knot interval), independent of $m$.
+
+The Stan-side implementation in `inst/stan/functions/W_basis.stan` evaluates the recurrence in a single forward pass over $d$ levels, with a local array of length $d + 1$ holding the partial values. The numerical cost per evaluation is $O(d^2)$, which is $O(1)$ at the default cubic. The R-side `W_basis()` constructor returns the basis evaluation matrix (for sampling-free contexts like coefficient interpretation) using the equivalent `splines::splineDesign` call from base R; the two evaluations agree to machine precision (verified by the regression test `test-bspline_W.R`).
+
+## **10.2. Boundary knot semantics**
+
+The `boundary_knots` argument of `W_basis(x, type, degree, knots, boundary_knots)` specifies the two outermost knots of the knot vector. The interior knots are passed via `knots`. The full knot vector is then constructed as
+
+$$\boldsymbol{\tau} \;=\; \bigl(\underbrace{\tau_{\mathrm{lo}}, \dots, \tau_{\mathrm{lo}}}_{d + 1}, \mathtt{knots}, \underbrace{\tau_{\mathrm{hi}}, \dots, \tau_{\mathrm{hi}}}_{d + 1}\bigr),$$
+
+with the boundary knots repeated $d + 1$ times to enforce zero-derivative-of-order $d$ at the boundaries (the "clamped" B-spline convention). This convention ensures that the basis evaluation at the boundary is well-defined and equal to one for the boundary basis function (a useful property for interpretation: the boundary coefficient is the response at the boundary).
+
+The R-side `W_basis()` constructor rejects configurations where the boundary knots are not strictly outside the range of `knots` (D4 strict validation), preventing the degenerate case where the boundary repetition overlaps the interior knots.
+
+---
+
+# **11. Sub-phase 8.3.9 -- Residuals G1 / G2 / G3 + S3 Methods Re-validation + Route B `predict.gdpar_fit` for $K > 1$**
+
+Sub-phase 8.3.9 introduced the three residual diagnostics that compose under $K \geq 1$. Each diagnostic is defined per slot and is unit-coherent with the slot's response scale.
+
+## **11.1. (G1) Pearson-type residual per slot**
+
+For slot $k$ and observation $i$, denote by $\mu_{i,k}(\theta_i)$ and $s_{i,k}(\theta_i)$ the slot-implied response mean and standard deviation (both functions of the full $\theta_i = (\theta_{i,1}, \dots, \theta_{i,K})$ in the general case, because slot statistics may depend on cross-slot quantities — e.g., for ZINB the slot-1 implied mean is the unconditional mean $\mu_i (1 - \pi_i)$ rather than just $\mu_i$). The Pearson-type residual is
+$$r_{i,k}^{(G1)} \;=\; \frac{y_i - \mu_{i,k}(\theta_i)}{s_{i,k}(\theta_i)}.$$
+For $K = 1$ Gaussian this reduces to the standard Pearson residual. For mixture / hurdle slots the residual uses the unconditional moments of the slot's marginal contribution.
+
+The (G1) residual is fast to compute (no auxiliary sampling) and is the canonical first-pass diagnostic. Its limitation is that it is symmetric in the location-scale family and does not detect distributional mis-specification beyond the second moment.
+
+## **11.2. (G2) Randomized quantile residual (Dunn-Smyth) per slot**
+
+For slot $k$ and observation $i$, the (G2) residual is
+$$r_{i,k}^{(G2)} \;=\; \Phi^{-1}\bigl(F_{i,k}(y_i^*)\bigr),$$
+where $F_{i,k}$ is the slot-conditional CDF and $y_i^*$ is the realized response, possibly jittered for discrete cases following Dunn & Smyth (1996). For continuous slots, $y_i^* = y_i$ and $F_{i,k}(y_i)$ is uniform on $[0, 1]$ under correct specification, so $r_{i,k}^{(G2)}$ is standard normal under the null. For discrete slots (Poisson, NB), $F_{i,k}$ is jittered as $u_i F_{i,k}(y_i) + (1 - u_i) F_{i,k}(y_i - 1)$ with $u_i \sim \mathrm{Uniform}(0, 1)$, restoring the continuous-uniform property under the null.
+
+For mixture / hurdle slots, the jitter respects the zero-component and the count-component separately: the zero-component is treated as the lump-mass at 0 (the jitter range is $[0, F_{i,k}(0)] = [0, \pi_i]$ for ZIP / Hurdle), and the positive-count component is jittered as in the count-only case.
+
+The (G2) residual detects distributional mis-specification beyond the second moment (skewness, kurtosis, tail behaviour). Its computational cost is moderate; it requires evaluating the slot-conditional CDF at every observation, which is closed-form for the built-in families but may require numerical integration for custom families.
+
+## **11.3. (G3) DHARMa-compatible scaled residual per slot**
+
+For slot $k$ and observation $i$, the (G3) residual is the rank of the realized response among $M$ posterior predictive draws, scaled to $[0, 1]$:
+$$r_{i,k}^{(G3)} \;=\; \frac{1}{M} \sum_{m=1}^{M} \mathbf{1}\bigl\{y_{i,k}^{(m)} \leq y_i\bigr\} \;+\; \frac{u_i}{M}, \qquad u_i \sim \mathrm{Uniform}(0, 1),$$
+where $y_{i,k}^{(m)}$ is the $m$-th posterior predictive draw for observation $i$ in slot $k$ and $u_i$ is a continuity-correction jitter. The diagnostic is compatible with the DHARMa R package's `simulationOutput` interface and is opt-in through the `dharma = TRUE` argument of `gdpar_residuals()`.
+
+The (G3) residual is the most expensive of the three (it requires $M$ posterior predictive draws per observation) but is the most general: it works for any family with a valid posterior predictive distribution, including custom families and complex mixture / hurdle compositions where the slot-conditional CDF (needed by G2) is unavailable in closed form.
+
+## **11.4. S3 method re-validation under $K > 1$**
+
+The S3 methods `coef.gdpar_fit`, `print.gdpar_fit`, `summary.gdpar_fit`, `predict.gdpar_fit`, and `gdpar_residuals` were re-validated under $K > 1$ in Sub-phase 8.3.9. Each method had been written under the assumption of $K = 1$ and required extension to the per-slot architecture.
+
+The release-gate decision is that the methods return *named lists per slot* under $K > 1$ (preserving access to per-slot diagnostics) and *flat vectors* under $K = 1$ (preserving backward compatibility with the Block 1 default). The dispatch is via a `is_K_gt_one(fit)` helper at the top of each method; the per-slot iteration is then uniform across families.
+
+The **Route B `predict.gdpar_fit` for $K > 1$** is the most non-trivial of the S3 re-validations: the predicted response under $K > 1$ is an array of dimension $S \times n \times K$ (posterior draws $\times$ observations $\times$ slots), and the per-slot inverse-link must be applied dimension-wise. The implementation in `R/methods.R::predict.gdpar_fit` dispatches to `predict_from_newdata_K` (the $K > 1$ helper) when `K > 1` and to `predict_from_newdata` (the $K = 1$ helper) otherwise. The slot-wise inverse-link dispatch uses `apply_inv_link_by_id` (see §9) on the R side, mirroring the Stan-side implementation.
+
+## **11.5. Bootstrapped goldens and the 16-column manifest**
+
+The release-gate of 8.3.9 introduced **14 bootstrapped goldens** with a 16-column manifest CSV recording the goldens' metadata: `stan_id`, $K$, family name, seed, bootstrap iterations, posterior draws, observations, slot link IDs, golden RDS path, golden hash, generation timestamp, framework version, R version, Stan version, gdpar git commit, and per-golden notes.
+
+The goldens are stored as compressed RDS files under `tests/testthat/_snaps/` and verified bit-exact in the regression tests `test-golden_regression_K2.R` and `test-golden_regression_8_3_9.R`. The bit-exactness check is at the per-slot coefficient level (machine precision); the test fails if any coefficient diverges by more than $10^{-12}$ relative to the golden, which catches both implementation drift and Stan-version-induced numerical changes.
+
+The 14 goldens cover the 7 mixture / hurdle and heterogeneous configurations plus 7 distributional / B-spline configurations selected to exercise the codegen paths that emerged in 8.3.4 to 8.3.8. The 16-column manifest is read by the regression tests via `manifest <- read.csv(system.file("extdata", "golden_manifest_8_3_9.csv", package = "gdpar"))` to dispatch each test case to its corresponding RDS file.
+
+---
+
+# **12. Sub-phase 8.3.10 -- Release-Gate for Session 8.3**
+
+Sub-phase 8.3.10 is the release-gate that closes Session 8.3 as a coherent extension cycle. Six decisions canonized:
+
+- **(E4.A) `coef.gdpar_fit` under $K > 1$ returns a named list of `gdpar_coef` per slot.** Each per-slot `gdpar_coef` is a `gdpar_coef` object with the slot's coefficient table, posterior summaries, and metadata. The list is named by the slot parameter names (`mu`, `sigma`, `phi`, etc.).
+- **(E5.C) Two vignettes added** (`vop04_amm_intermediate.Rmd` for B-spline + heterogeneous families, `vop05_distributional_K_dharma.Rmd` for the $K > 1$ distributional path + DHARMa diagnostics).
+- **(E6.C) Compare-path tiered Tier 1 / Tier 2.** The audit-compare path between two fits (`gdpar_compare_fits`) is tiered: Tier 1 is the structural compare (same `stan_id`, same $K$, same `inv_link_id_per_slot`) verifiable bit-exact; Tier 2 is the semantic compare across paths and bridges (Path A vs Path B; EB vs FB), verifiable on summary statistics. The tiering is a release-gate decision to prevent the bit-exact gate from over-fitting to numerical noise across paths.
+- **(V.B) Development version `0.0.0.9001`.** The version bump from `0.0.0.9000` to `0.0.0.9001` marks the closure of Session 8.3 as a coherent development cycle. The version stays at `0.0.0.9001` through Sub-phases 8.4, 8.5.A, 8.5.B, 8.6 (entire), and the present audit (Block 8.4 Stage 2); a release bump (to `0.1.0` or similar) is deferred to post-Block-9 validation.
+- **(Fuzz S3 PASS + Tier 1 PASS + Tier 2 PASS bit-exact.)** The release-gate verified `coef` / `predict` / `summary` / `print` under a randomized fuzz over 108 fits (varying $K$, `stan_id`, family, grouping, paths); 36 Tier 1 compares; 6 Tier 2 compares. All passed.
+- **R CMD check `0 ERRORs / 0 WARNINGs / 0 NOTEs`, `Status: OK`.** The release-gate verifies clean R CMD check from `/tmp/` at the time of closure.
+
+## **12.1. Fuzz testing protocol**
+
+The release-gate fuzz exercises the S3 methods (`coef`, `predict`, `summary`, `print`, `gdpar_residuals`) under randomized configurations to catch silent regressions that fixed-configuration smokes might miss. The protocol is:
+
+1. **Configuration sampler.** For each fuzz run, sample $(K, \texttt{stan\_id}, \texttt{family\_args}, \texttt{group\_size}, \texttt{path})$ from the admissible product space: $K \in \{1, 2, 3\}$, $\texttt{stan\_id} \in \{1, \dots, 13\}$ subject to $K \geq K_{\min}(\texttt{stan\_id})$, `family_args` drawn from a per-family valid range, `group_size` $\in \{1, 5, 25\}$, `path` $\in \{$Path A, Path B$\}$. Sampling rejects degenerate configurations (e.g., $K = 1$ for ZIP).
+2. **Synthetic data generator.** For the sampled configuration, generate $n = 200$ observations from the corresponding distribution under known true parameters. The true parameters are stored as ground truth for the post-fit comparison.
+3. **Fit and call all S3 methods.** Run `gdpar()` with the sampled configuration; call `coef(fit)`, `predict(fit)`, `summary(fit)`, `print(fit)`, `gdpar_residuals(fit)`. Each call must return an object of the expected class, satisfy the K-dispatch contract (named list per slot for $K > 1$; flat for $K = 1$), and pass schema-validation expectations.
+4. **Tier 1 bit-exact compare.** For 36 of the 108 fits, re-fit under identical seed and assert bit-exact equality of the coefficient table, the predicted means, and the residuals (machine precision: $10^{-12}$ relative tolerance).
+5. **Tier 2 semantic compare.** For 6 of the 108 fits, fit twice under different paths (Path A and Path B) and assert that the posterior summary statistics agree within statistical sampling tolerance (Monte Carlo standard error $\times 3$).
+
+The fuzz protocol is implemented in `tests/testthat/test-fuzz_s3.R`, gated by the environment variable `GDPAR_RUN_STAN_S3_FUZZ=1` because each fuzz fit takes 10-60 seconds and the full sweep is several CPU-hours. The release-gate ran the full fuzz once at closure; subsequent CI runs sample a subset.
+
+## **12.2. Debts recorded at release-gate**
+
+The release-gate of Sub-phase 8.3.10 recorded the following debts for Sub-phase 8.4 (the audit phase):
+
+- **Vignette additions for the Sub-phase 8.3.x decisions.** The present vignette canonizes that debt.
+- **Uniform Stan-template consolidation.** Originally registered as `project_gdpar_deuda_8_4_unificacion_stan`. Canonized in Sub-sub-fase 9.3.a (Block 9, Session B9.3, 2026-05-27) under the lateral decision B.iv: the unification is realized at the R-side codegen layer rather than at the `.stan` file layer. The R-side dispatcher `.gdpar_emit_canonical_stan(spec)` is the single source of truth for the K = 1 FB Stan emissions; the two legacy templates `amm_main.stan` (p = 1) and `amm_distrib_multi.stan` (p $\geq$ 1) are renamed to `amm_canonical_p1.stan` and `amm_canonical_pmulti.stan` and relocated to `inst/stan/_canonical_pieces/`. The public-internal wrappers `generate_stan_code()` and `generate_stan_code_multi()` are reduced to thin delegators (~10 lines each) that construct a codegen spec and call the dispatcher. Bit-exactness of the substituted Stan source is preserved by construction (the dispatcher emits byte-identical strings to the legacy paths for the same inputs); no golden re-bootstrap was required. The dedicated sub-debt of factoring the duplicated `bspline_basis_eval` and `apply_W_basis_diff` helpers into a single shared piece (the explicit deuda f originally noted inline in the multivariate template's header) was **closed in Sub-sub-fase 9.3.a colateral** (Block 9, Session B9.4, 2026-05-27) under the lateral decision G.iv: the helpers live in a dedicated `inst/stan/_canonical_pieces/amm_canonical_helpers.stan` Stan source FRAGMENT (no surrounding `functions { }` block; not standalone-parseable) and the dispatcher inserts them via R-side textual substitution at the `// {{CANONICAL_HELPERS}}` placeholder inside the body pieces' `functions { }` block. No cmdstan `#include` semantics are used (the dispatcher is the sole assembly site). Stan semantics are preserved bit-exact (helper-block comments unified across the body pieces, taking the detailed algorithmic version from `canonical_p1`); goldens remain valid by-construction; `cmdstanr` cache hash recompiles once on the first call post-B9.4. The same helpers piece is consumed by the EB-side cascade pending in B9.5+.
+- **Path C bit-exact comparator template** (originally projected as `amm_distrib_KxP.stan`): **codegen + dispatcher canonized in Sub-bloque 9.3.d** (Block 9, Session B9.5, 2026-05-27) under the lateral decision I.iv + the piece arquitectonica J.iv.A (DESIGN_9_3_D_PATH_C.md sub-decision 3.2). The realization avoids creating a new top-level `.stan` file: a dedicated canonical piece `inst/stan/_canonical_pieces/amm_canonical_pmulti_KxP.stan` is dispatched via `.gdpar_emit_canonical_stan(spec)` with `spec$p_class = "pmulti_KxP"`, reusing the canonical helpers piece infrastructure of G.iv. The new piece mirrors `amm_eb_marginal_KxP.stan` (the EB-side architecture canonized in Sub-fase 8.6.D) extended with the globally shared W modulating component and the full Path B family set $\{1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13\}$. The fit harness was the deuda D69 deferred from B9.5; **operationally closed in Session B9.6** (2026-05-27) under the canonized decisions M.iv unified + N.a: the unified assembler `.assemble_stan_data_KxP(spec)` now dispatches on `path = c("EB", "FB")` (the EB branch preserves byte-identical the 8.6.D first-iteration restrictions; the FB branch lifts W disabled + restricted stan_id to the full Path B set with the W block metadata fields appended) and the new internal driver `.gdpar_fb_KxP_fit()` composes design + assembler + cmdstanr sampling, reusing the canonical EB-side init helper `.gdpar_eb_make_random_init_KxP()` (Sub-fase 8.6.D Session 13c). The 4 reserved canonical seeds $91001 \ldots 91004$ for the K.c roster (gaussian / beta / gamma / student_t) are now produced as Tier 1 fitable goldens in `tests/testthat/data/golden_fb_KxP_<family>_polynomial_K<K>_p<p>.rds` with the canonical 16-column manifest row.
+- **KSD-joint for EB-vs-FB comparison.** The current `gdpar_compare_eb_fb` reports total-variation (TV) on marginal posteriors; the joint KSD (kernel Stein discrepancy) deferred to Block 9.x.
+
+---
+
+# **13. Synthesis: The Per-Slot Architecture as a Coherent Design**
+
+Read sequentially, Sub-phases 8.3.1 to 8.3.10 implement a single architectural decision applied consistently: **the per-slot resolution layer is the single source of truth for everything that depends on the slot index $k$**. Five corollaries follow:
+
+- **(Corollary 1, codegen.)** Stan-side per-slot expansions (`THETA_REF_PRIOR_BLOCK`, `apply_inv_link_by_id`, `apply_W_basis_diff`) read their per-slot configuration from `param_specs` rather than from per-family branches. The codegen is therefore *family-agnostic* at the slot-iteration level.
+- **(Corollary 2, identifiability.)** The (D-ID) check (§4) is naturally per slot because the architecture is per slot. Heterogeneous families per slot (§9) inherit (D-ID) without further work.
+- **(Corollary 3, custom families.)** A custom family added via `gdpar_family_custom_K` (§5) participates in the per-slot architecture immediately, without modifications to the codegen, the (D-ID) check, the residual diagnostics, or the S3 methods.
+- **(Corollary 4, residuals.)** The G1 / G2 / G3 diagnostics (§11) compose per slot under any $K \geq 1$ family registered in `param_specs`. Adding a new family adds a new slot's residual contribution without touching the diagnostic code.
+- **(Corollary 5, S3 methods.)** The S3 methods (§11, §12) dispatch on `K > 1` once at the top level and then iterate over slots. The dispatch logic is uniform across families.
+
+The architecture's structural cost is the up-front investment in `param_specs` and the integer-dispatch helpers (§5, §9, §10). The structural benefit is that the cost is paid *once* and amortized across all families and all future extensions.
+
+---
+
+# **14. Implementation Status (Release-Gate Context)**
+
+The present vignette canonizes decisions implemented in development version `0.0.0.9001` and verified at the release-gate of Sub-phase 8.3.10. Concretely:
+
+- The 13 built-in families with `stan_id` in $\{1, \dots, 13\}$ are implemented and tested. The custom-family path via `gdpar_family_custom_K` is operational; `lognormal_loc_scale` is the canonical example.
+- The B-spline W basis is implemented and gated by the Sub-phase 8.3.8 smokes; the bootstrapped goldens of Sub-phase 8.3.9 cover the regression cases.
+- The G1 / G2 / G3 residuals are implemented under any registered family; the DHARMa-compatible (G3) is opt-in through the `dharma = TRUE` argument.
+- The S3 methods (`coef`, `predict`, `summary`, `print`, `gdpar_residuals`) are implemented under any $K \geq 1$ and verified bit-exact for the registered families.
+
+The following items are **deferred** at the time of this vignette (Block 8.4 Stage 2 audit closure):
+
+- **Hurdle-continuous families** (Hurdle-Gamma, Hurdle-Lognormal): deferred to a future sub-phase as out-of-scope for Sub-phase 8.3.6.
+- **$K \geq 3$ heterogeneous configurations**: rejected at Sub-phase 8.3.7 release-gate as out-of-scope; opt-in via the public named-list API rejects these configurations at the guard.
+- **Multi-parametric extension ($p \geq 1$ Block 8 + $K \geq 1$ Block 8.3 coupled to anchored hierarchical pooling)**: implemented at Sub-phase 8.6 (Blocks 8.6.A / B / C / D); the present vignette is restricted to the $K$-axis.
+- **External validation against TOP-3 competitors** (mgcv, brms, INLA on the eBird benchmark): scheduled for Block 9 (re-validation; the original Block 7 internal benchmark validated $K = 1$ Gaussian / Poisson / NB).
+- **Path C ($K > 1 \wedge p > 1$) bit-exact comparator template**: codegen + dispatcher + piece architecture **closed in Sub-bloque 9.3.d** (Block 9, Session B9.5) per the I.iv + J.iv.A canonization; the FB fit harness (assembler + driver + 4 fitable goldens with bootstrapped manifest rows) **closed in Session B9.6** under the M.iv unified + N.a canonizations. Cluster K4 of Sub-bloque 9.3 is now fully closed (FB-side + EB-side cascade L heredada + fit harness D69).
+- **Internal synthetic adversarial re-validation (Sub-bloque 9.1)**: opened in Session B9.7 under Decision C.iv (layered defence with drift-gated reseed). Layers 1-3 (structural adversarial fuzz, deterministic property-based invariances, NA / outlier robustness) plus a bit-exact drift smoke executed substantively; the Stan-bound layers (statistical fit fuzz, 12-family outcome-outlier stress, full bit-exact compare-path) are gated to the nocturnal B9.8 sub-unit. Report: `inst/benchmarks/results/block9_internal.md`.
+
+The release version bump from `0.0.0.9001` to a stable `0.1.0` or similar is scheduled for post-Block-9 closure.
+
+---
+
+# **15. References (selective)**
+
+- **Dunn, P. K. & Smyth, G. K.** (1996). Randomized quantile residuals. *Journal of Computational and Graphical Statistics* **5**(3), 236--244.
+- **Dunn, P. K. & Smyth, G. K.** (2005). Series evaluation of Tweedie exponential dispersion model densities. *Statistics and Computing* **15**(4), 267--280.
+- **Hartig, F.** (2024). DHARMa: Residual diagnostics for hierarchical (multi-level / mixed) regression models. R package, CRAN.
+- **Carpenter, B., Gelman, A., Hoffman, M. D., Lee, D., Goodrich, B., Betancourt, M., Brubaker, M., Guo, J., Li, P., & Riddell, A.** (2017). Stan: A probabilistic programming language. *Journal of Statistical Software* **76**(1), 1--32.
+- **Cox, M. G.** (1972). The numerical evaluation of B-splines. *IMA Journal of Applied Mathematics* **10**(2), 134--149.
+- **de Boor, C.** (1972). On calculating with B-splines. *Journal of Approximation Theory* **6**(1), 50--62.
+- **Mullahy, J.** (1986). Specification and testing of some modified count data models. *Journal of Econometrics* **33**(3), 341--365 (hurdle models).
+- **Lambert, D.** (1992). Zero-inflated Poisson regression, with an application to defects in manufacturing. *Technometrics* **34**(1), 1--14.
+
+---
+
+*End of v08d.*

@@ -1,0 +1,587 @@
+---
+title: "**Theoretical Addendum -- Block 8.5.A:**"
+subtitle: "The T-learner AMM-side Causal Bridge: Canonization and Implementation"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{The T-learner AMM-side Causal Bridge}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+# **1. Purpose and position in the package**
+
+This vignette canonizes the **T-learner AMM-side causal bridge** introduced
+in Sub-phase 8.5.A. It is the operative continuation of
+`vignette("v08_cate_ite_positioning")`: where v08 places AMM relative to
+the CATE/ITE literature (Proposition 8A: AMM is a predictive object, CATE
+is a counterfactual object), this addendum specifies the one explicit
+construction that turns a *pair* of independent AMM fits into a CATE
+estimator. The construction follows the **T-learner** of
+Kuenzel et al. (2019), specialized to the AMM-side.
+
+The exported entry point is the function
+`gdpar_causal_bridge(fit_treat, fit_ctrl, newdata, ...)`. The function is
+**not** an argument of `gdpar()`; it is a separate function that consumes
+two `gdpar_fit` objects already produced by `gdpar()`. This API choice
+preserves the strict separation between AMM as a generic predictive
+framework and CATE as a causal-identification overlay (Proposition 8A);
+it also keeps the bridge decoupled from the inference machinery so that
+S-learner, X-learner, doubly-robust and double-machine-learning
+extensions can be added in later sub-phases without disturbing the AMM
+core.
+
+**What this addendum is.** A formal definition of the T-learner AMM-side,
+the identification assumptions it inherits from v02 plus the residual
+no-confounding assumption that it introduces, the posterior-difference
+estimator and its credible bounds, and the structural compatibility
+contract the bridge enforces between the two fits. The minimum
+reproducible example of §8 exercises the whole API; the limitations and
+open questions of §9 and §10 anchor the deferred extensions in Block 9.
+
+**What this addendum is not.** It is not a tutorial on causal inference
+(Imbens-Rubin 2015 remains the canonical reference); it is not a
+comparator with external meta-learners (Sub-phase 8.5.B); it is not a
+guide to specifying AMM models (v00, v01, vop01-vop05 cover that).
+
+---
+
+# **2. Notation inherited from v08 (rapid reference)**
+
+For full statements see `vignette("v08_cate_ite_positioning")` §2 and
+Appendix A. The minimal table needed here:
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $T_i \in \{0, 1\}$ | Treatment indicator |
+| $(Y_i(0), Y_i(1))$ | Potential outcomes (Rubin 1974) |
+| $Y_i = T_i Y_i(1) + (1 - T_i) Y_i(0)$ | Observed outcome under (CONS) |
+| $\mu_t(x) = \mathbb{E}[Y(t) \mid X = x]$ | Conditional potential-outcome means |
+| $\tau(x) = \mu_1(x) - \mu_0(x)$ | CATE function |
+| $e(x) = \Pr(T = 1 \mid X = x)$ | Propensity score |
+| $\theta_i^{(t)} = \theta_{\text{ref}}^{(t)} + \Delta^{(t)}(x_i, \theta_{\text{ref}}^{(t)})$ | AMM parameter under arm $t \in \{0, 1\}$ |
+| $(\text{IGN})$ | Ignorability: $(Y(0), Y(1)) \perp T \mid X$ |
+| $(\text{OVL})$ | Overlap: $0 < e(x) < 1$ for $\mu$-a.e. $x$ |
+| $(\text{CONS})$ | Consistency / SUTVA |
+
+The superscript $(t)$ on AMM objects refers to the *arm* under which the
+fit was produced (treatment arm $t = 1$, control arm $t = 0$). The T-learner
+fits one AMM model per arm independently; the per-arm parameters
+$\theta_i^{(t)}$ are different objects of estimation, and there is no
+parameter shared between the two fits.
+
+---
+
+# **3. Definition: the T-learner AMM-side**
+
+> **Definition 8.5.A-1 (T-learner AMM-side).** Let $\mathcal{D}_1 =
+> \{(x_i, y_i) : T_i = 1\}$ and $\mathcal{D}_0 = \{(x_i, y_i) : T_i = 0\}$
+> be the treatment and control sub-samples. Fix one AMM specification
+> $\mathcal{A}$ (formula, family with link $g$, anchor, AMM level,
+> modulating basis) and use it for both arms. The **T-learner AMM-side
+> bridge** is:
+>
+> 1. Fit $\widehat{\theta}^{(1)} = \texttt{gdpar}(\mathcal{D}_1, \mathcal{A})$.
+> 2. Fit $\widehat{\theta}^{(0)} = \texttt{gdpar}(\mathcal{D}_0, \mathcal{A})$.
+> 3. For every $x \in \mathcal{X}_{\text{new}}$, define the per-arm
+>    response-scale prediction
+>    $\widehat\mu_t(x) = g^{-1}\!\left( \widehat\theta^{(t)}(x) \right)$
+>    on the inverse link of each arm's predicted individual parameter.
+> 4. The bridge estimator of the CATE at $x$ is
+>    $$\widehat\tau(x) \;=\; \widehat\mu_1(x) - \widehat\mu_0(x).$$
+
+The definition makes three architectural commitments explicit:
+
+(a) **Structural symmetry between arms.** The two arms share the same
+    AMM specification $\mathcal{A}$. The bridge does not entertain
+    asymmetric specifications (treatment with one AMM level, control
+    with another); such asymmetry would break the comparability of the
+    two arms' predictive objects on which the T-learner depends.
+    `gdpar_causal_bridge` enforces this with structural compatibility
+    checks (see §5 and the function's `@details`).
+
+(b) **No parameter sharing.** Unlike the S-learner (which fits one model
+    on the pooled data with $T$ as a covariate) the T-learner fits two
+    independent models. The joint posterior of
+    $(\theta^{(0)}, \theta^{(1)})$ factorizes:
+    $$p\!\left(\theta^{(0)}, \theta^{(1)} \mid \mathcal{D}_0 \cup
+    \mathcal{D}_1\right) \;=\; p\!\left(\theta^{(0)} \mid \mathcal{D}_0\right)\,
+    p\!\left(\theta^{(1)} \mid \mathcal{D}_1\right),$$
+    a direct consequence of $\mathcal{D}_0 \cap \mathcal{D}_1 = \emptyset$
+    and the independence of the two priors (gdpar uses the same prior
+    distribution for both arms by default, but the *random* variables
+    drawn from those distributions are independent across arms). This
+    is the *raison d'être* of the per-draw difference of §6.
+
+(c) **Response-scale CATE by default.** Step (3) applies the inverse
+    link before the difference, so $\widehat\tau(x)$ is on the natural
+    scale of the response (mean for Gaussian, rate for Poisson, success
+    probability for Bernoulli, etc.). The package also exposes the
+    linear-predictor scale (`type = "theta_i"`) for users who prefer to
+    report differences on the link-transformed scale; the trade-off is
+    that the linear-predictor difference is in units of the link, which
+    are not always interpretable as treatment effects.
+
+The bridge is **agnostic to the AMM Path**. Definition 8.5.A-1 is stated
+in terms of the fitted parameter $\widehat\theta^{(t)}$ without reference
+to the path that produced it; Path 1 (Bayesian) is the only path
+implemented in 0.0.0.9001 (Sub-phase 8.5.A constrains the bridge to
+`path = "bayes"` and aborts otherwise). Paths 2 and 3 are mapped to the
+same construction in §10's open questions.
+
+---
+
+# **4. Identification assumptions**
+
+The bridge inherits the **AMM identifiability hypotheses** of Block 1
+(applied to each arm) and the **gnoseological validity hypotheses** of
+v02 (applied to each arm). On top of those, the T-learner requires the
+*classical* causal-identification hypotheses of v08 §2.1, restated here
+for self-containment, plus one additional structural assumption that is
+specific to the per-arm decomposition.
+
+## **4.1. Inherited from v08**
+
+- **(IGN) Ignorability:** $(Y(0), Y(1)) \perp T \mid X$.
+- **(OVL) Overlap:** $0 < e(x) < 1$ for $\mu$-a.e. $x$.
+- **(CONS) Consistency / SUTVA:** $Y_i = T_i Y_i(1) + (1 - T_i) Y_i(0)$.
+
+Under (IGN)+(OVL)+(CONS), Imbens-Rubin (2015, Theorem 12.1) gives the
+identifying formula $\mu_t(x) = \mathbb{E}[Y \mid X = x, T = t]$. The
+right-hand side is the per-arm conditional expectation that each AMM
+fit estimates: $\widehat\mu_t(x) = g^{-1}(\widehat\theta^{(t)}(x))$. The
+identification of the CATE at $x$ thus reduces to the identification of
+each arm's per-arm conditional expectation, which is exactly the AMM
+identification problem of Block 1.
+
+## **4.2. Residual no-confounding (T-learner-specific)**
+
+The T-learner additionally requires what we call **(NCR) Residual
+no-confounding within each arm**:
+
+> **(NCR).** Within each arm $t \in \{0, 1\}$, the AMM specification
+> $\mathcal{A}$ contains all covariates necessary to make the conditional
+> expectation $\mathbb{E}[Y \mid X = x, T = t]$ identifiable from the
+> arm's sub-sample. Equivalently, no unmeasured confounder of the
+> outcome-treatment relationship is omitted from the AMM components
+> $(a, b, W, x_{\text{vars}})$ at the level of each arm.
+
+(NCR) is not a new substantive assumption beyond (IGN): if (IGN) holds
+at $x$ and $X$ is fully observed, the arm-specific conditional
+expectation is by definition identifiable. (NCR) merely makes the
+*operational* responsibility explicit: the user must include in the AMM
+specification *all the covariates whose omission would create within-arm
+confounding*. A common failure mode is to omit interactions with $T$
+that, under the pooled S-learner specification, would be absorbed by the
+treatment-indicator coefficient; the T-learner has no treatment
+indicator (each arm is fit separately), so omitted interactions
+contaminate the within-arm conditional expectation directly.
+
+The bridge does not — and cannot — verify (IGN) or (NCR) from the data
+alone; they are *causal* assumptions and require domain knowledge or
+design (randomization, instrumental variables, regression
+discontinuities) to underwrite them. The bridge does verify the
+*structural pre-conditions* that make the T-learner construction
+well-defined: family, link, AMM level, anchor, covariate column
+structure (see §5).
+
+## **4.3. What the bridge does not assume**
+
+- **No homoscedasticity across arms.** Each arm has its own posterior
+  of $\sigma_y$ (Gaussian), $\phi$ (Negative Binomial), etc. The bridge
+  does not assume that the two posteriors are equal.
+- **No common modulating block.** Each arm has its own posterior of
+  $W_{\text{raw}}$, $\sigma_W$. The bridge does not assume that the
+  modulating block is the same in the two arms (treatment may amplify or
+  dampen the modulation).
+- **No equal sample sizes.** The bridge handles unbalanced sub-samples
+  (different number of rows in $\mathcal{D}_1$ and $\mathcal{D}_0$); the
+  T-learner is known to suffer from regularization-induced bias in this
+  setting (§9).
+
+---
+
+# **5. Estimation**
+
+The bridge is constructed by `gdpar_causal_bridge(fit_treat, fit_ctrl,
+newdata, type, level)`. The structural pre-conditions enforced at
+construction time are:
+
+- **Path:** both fits have `path = "bayes"`.
+- **Non-hierarchical:** both fits have `stan_data$use_groups == 0L`.
+  The grouped regime of Block 6.5 introduces per-group anchors whose
+  treatment under the T-learner difference is not defined in the
+  canonical formulation; grouped bridges are queued for a future
+  sub-phase (see §10).
+- **Family and link:** both fits share `family$name` and `family$link`,
+  and the per-slot family identifiers when $K > 1$.
+- **Dim:** both fits share `K` and `p`.
+- **AMM level and basis:** both fits share `amm$level` (or per-slot
+  levels when $K > 1$) and `amm$W$type` (polynomial or B-spline).
+- **Anchor:** both fits share the anchor value within a relative
+  tolerance of $10^{-8}$. This is necessary because the anchor enters
+  the modulating term as $\theta_{\text{ref}}^k - \mathrm{anchor}^k$; a
+  mismatch changes the meaning of $\widehat\theta^{(t)}(x)$ and
+  therefore of $\widehat\tau(x)$.
+- **Covariate columns:** both fits share the set of variables that
+  appear in `a`, `b`, and `x_vars` (per coordinate / slot when
+  multi-dimensional).
+
+Any violation aborts with `gdpar_unsupported_feature_error`. The intent
+of the strict compatibility contract is to refuse meaningless bridges
+loudly rather than silently produce CATE estimates whose decomposition
+mixes incompatible AMM objects.
+
+When the structural pre-conditions hold, the bridge calls
+`predict.gdpar_fit(fit_treat, newdata, type, summary = "draws")` and
+`predict.gdpar_fit(fit_ctrl, newdata, type, summary = "draws")`, aligns
+their draws (see §6), and computes the per-draw, per-observation
+difference:
+
+$$\widehat{\tau}^{(s)}_i \;=\; \widehat{\mu}^{(s)}_{1}(x_i) \;-\;
+\widehat{\mu}^{(s)}_{0}(x_i), \qquad s = 1, \ldots, S, \ i = 1, \ldots,
+n_{\text{new}}.$$
+
+The matrix $\widehat{\tau} \in \mathbb{R}^{S \times n_{\text{new}}}$ is
+stored in the returned object as `cate_draws`. For multivariate
+($p > 1$) or K-individual ($K > 1$) fits, `predict.gdpar_fit` returns a
+3-array of shape $S \times n \times \dim$; the bridge computes the
+elementwise difference and stores it as a 3-array of the same shape.
+
+---
+
+# **6. Inference: per-observation credible bounds and the ATE**
+
+The two fits are sampled from disjoint sub-samples and are therefore
+*posteriori* independent: the joint posterior of
+$(\theta^{(0)}, \theta^{(1)})$ factorizes (§3 (b)). Any draw
+$(\widehat{\theta}^{(0), s_0}, \widehat{\theta}^{(1), s_1})$ with $s_0$
+and $s_1$ drawn independently from each marginal is a valid sample from
+the joint. The bridge implements this by pairing the $s$-th draw of one
+arm with the $s$-th draw of the other arm, which — under the Monte
+Carlo exchangeability of draws within a chain — is a uniformly
+distributed pairing. When the two fits have different numbers of draws
+$S_t \ne S_c$, the bridge trims the longer arm to
+$S = \min(S_t, S_c)$ and emits a `gdpar_diagnostic_warning`.
+
+The per-observation posterior of the CATE at $x_i$ is summarized by:
+
+- The empirical mean $\overline{\tau}_i = S^{-1} \sum_{s=1}^{S}
+  \widehat{\tau}_i^{(s)}$, stored as `cate_mean`.
+- The empirical $(\alpha/2, 1 - \alpha/2)$ quantiles with
+  $\alpha = 1 - \mathrm{level}$, stored as `cate_ci` (default
+  $\mathrm{level} = 0.95$).
+
+The summary uses *empirical quantiles*, not a normal-approximation
+interval, because the per-arm posteriors are not necessarily Gaussian
+(small-sample, non-Gaussian families) and the difference of two
+near-Gaussian distributions can have meaningfully heavy tails when the
+two marginals have different scales.
+
+**Marginal ATE.** The bridge's `summary()` method also reports the
+marginal average treatment effect (ATE) over the evaluation grid:
+
+$$\widehat{\text{ATE}} \;=\; \frac{1}{n_{\text{new}}} \sum_{i = 1}^{n_{\text{new}}}
+\overline{\tau}_i.$$
+
+The credible bounds of the ATE are computed by first averaging the
+per-draw CATE over the evaluation grid (giving an
+$S$-vector of per-draw ATEs) and then taking the empirical quantiles of
+that vector. This ordering preserves the posterior shape of the ATE; it
+is *not* equivalent to averaging the per-observation credible bounds.
+The latter would underestimate the width of the ATE interval by ignoring
+the cross-observation correlation introduced by parameter sharing
+within each arm.
+
+---
+
+# **7. Identifiability per arm**
+
+The bridge inherits the AMM identifiability machinery of Block 1 and
+the (C1)-(C6) static identifiability conditions of v01. Each arm is
+fitted by `gdpar()`, which runs the pre-flight identifiability check
+internally and populates the `identifiability_report` slot of the
+fit. The bridge records both reports as `id_check = list(treat = ...,
+ctrl = ...)` in the returned object; failures in either arm propagate as
+failures of the bridge construction (the upstream `gdpar()` call would
+have refused to fit if (C1)-(C6) were violated).
+
+**(C7) anti-aliasing of Block 6.5** (the grouped-anchor condition) is
+*structurally moot* in Sub-phase 8.5.A because the bridge aborts on
+hierarchical fits (§5, `use_groups == 0L` is required on both arms). The
+design contract is documented here for forward compatibility: when a
+future sub-phase extends the bridge to hierarchical fits, the canonical
+treatment will invoke `gdpar:::.check_group_aliasing_c7()` on each
+arm's design separately, and a violation in either arm will abort the
+construction. The per-arm invocation, rather than a joint invocation, is
+necessary because the two arms have independent group-anchor columns
+(the per-group anchors $\theta_{\text{ref}}^{(t)}[g]$ are independent
+across arms).
+
+---
+
+# **8. Minimum reproducible example**
+
+The example below is a CRAN-valid demonstration of the bridge on
+synthetic data. The treatment effect is heterogeneous in $x_1$
+($\tau(x) = 1 + 0.5 x_1$); the example fits both arms, constructs the
+bridge on a coarse evaluation grid, and prints the bridge and its
+summary.
+
+```{r dgp, eval = FALSE}
+library(gdpar)
+set.seed(20260524)
+n_per_arm <- 300L
+beta0 <- 0.2; beta1 <- 0.8
+tau0  <- 1.0; tau1  <- 0.5  # true CATE: tau(x) = tau0 + tau1 * x
+df_treat <- data.frame(
+  x1 = rnorm(n_per_arm),
+  y  = NA_real_
+)
+df_treat$y <- (beta0 + tau0) +
+  (beta1 + tau1) * df_treat$x1 + rnorm(n_per_arm, sd = 0.4)
+df_ctrl <- data.frame(
+  x1 = rnorm(n_per_arm),
+  y  = NA_real_
+)
+df_ctrl$y <- beta0 + beta1 * df_ctrl$x1 + rnorm(n_per_arm, sd = 0.4)
+```
+
+```{r fits, eval = FALSE}
+fit_treat <- gdpar(
+  formula       = y ~ x1,
+  family        = gdpar_family("gaussian"),
+  amm           = amm_spec(a = ~ x1),
+  data          = df_treat,
+  chains        = 2L,
+  iter_warmup   = 500L,
+  iter_sampling = 500L,
+  refresh       = 0L,
+  verbose       = FALSE
+)
+fit_ctrl <- gdpar(
+  formula       = y ~ x1,
+  family        = gdpar_family("gaussian"),
+  amm           = amm_spec(a = ~ x1),
+  data          = df_ctrl,
+  chains        = 2L,
+  iter_warmup   = 500L,
+  iter_sampling = 500L,
+  refresh       = 0L,
+  verbose       = FALSE
+)
+```
+
+```{r bridge, eval = FALSE}
+grid <- data.frame(x1 = seq(-2, 2, length.out = 21L))
+bridge <- gdpar_causal_bridge(fit_treat, fit_ctrl, newdata = grid)
+print(bridge)
+summary(bridge)
+```
+
+The expected output is a `gdpar_causal_bridge` object whose
+per-observation `cate_mean` traces the linear function $1 + 0.5 \cdot x_1$
+to within posterior credible bounds. The marginal ATE on the symmetric
+grid $[-2, 2]$ is close to $1.0$ (the constant term of the heterogeneous
+CATE).
+
+To re-evaluate the bridge on a fresh grid without re-running the
+compatibility checks, use `predict.gdpar_causal_bridge`:
+
+```{r repredict, eval = FALSE}
+grid2 <- data.frame(x1 = seq(-1, 1, length.out = 11L))
+re <- predict(bridge, newdata = grid2)
+str(re, max.level = 1L)
+```
+
+---
+
+# **9. Limitations of the T-learner**
+
+The T-learner is the most direct meta-learner from a structural
+standpoint (one arm equals one fit equals one model), but it is not
+universally optimal. The principal limitations are well-known
+(Kuenzel et al. 2019 §3.4):
+
+(a) **Regularization-induced bias in unbalanced samples.** When one arm
+    is much larger than the other, the smaller arm's posterior is more
+    diffuse and the bridge's CATE estimate inherits that diffusion
+    asymmetrically. The T-learner has no mechanism to borrow strength
+    across arms; the S-learner and X-learner do (the former by pooling
+    in a single model, the latter by an explicit cross-arm correction).
+    The diffusion is faithfully transmitted to the credible bounds, so
+    the bridge does not understate uncertainty — but the *point*
+    estimate may be biased toward the more diffuse arm's prior.
+
+(b) **No common feature representation.** The two arms have independent
+    AMM fits and therefore independent posterior estimates of the basis
+    coefficients $a$, $c_b$, $W_{\text{raw}}$. Any feature that is
+    informative *only* in combination with treatment is not modeled
+    as such (the treatment indicator is absent from each arm's
+    specification by construction); the two arms simply do not have a
+    common feature space at the parameter level.
+
+(c) **Sensitivity to mis-specification of the conditional mean.**
+    Like all conditional-mean estimators, the T-learner relies on the
+    correct specification of $\mu_t(x)$. AMM mitigates this via the
+    explicit additive-multiplicative-modulated decomposition and the
+    identifiability diagnostics of Block 2, but the underlying
+    sensitivity remains: a mis-specified AMM in either arm produces a
+    biased CATE.
+
+**Deferred alternatives.** S-learner, X-learner, doubly-robust (DR), and
+double-machine-learning (DML) constructions are queued for Block 9.
+They will be added as separate functions (`gdpar_causal_s_learner`,
+`gdpar_causal_x_learner`, `gdpar_causal_dr`, etc.) following the same
+S3-friendly pattern as `gdpar_causal_bridge`, never as arguments of
+`gdpar()`; the principle of strict separation between AMM as predictive
+framework and CATE as causal overlay (§1) is preserved across all the
+deferred constructions.
+
+---
+
+# **10. Open questions (O*-CATE)**
+
+The following questions are deferred to Block 9 sub-phases or to
+Sub-phase 8.5.B. Each is anchored to a specific Path or external
+dependency.
+
+> **(O1-CATE) Paths 2 and 3.** Extension of the T-learner AMM-side to
+> the varying-coefficient model (Path 2) and the amortized hypernetwork
+> (Path 3). The construction of Definition 8.5.A-1 is path-agnostic at
+> the level of the fitted parameter $\widehat\theta^{(t)}(x)$, but the
+> posterior of $\theta$ in Paths 2 and 3 is structurally different
+> (penalized-spline posterior in Path 2; amortized variational
+> posterior in Path 3) and the credible bounds of §6 need adaptation.
+> Queued for Block 9.
+
+> **(O2-CATE) Hierarchical bridges.** Extension to fits with
+> `use_groups == 1L`. The canonical treatment will invoke
+> `.check_group_aliasing_c7()` per arm (§7) and decompose the CATE into
+> a between-group and a within-group component. The decomposition is
+> non-trivial because the per-group anchors $\theta_{\text{ref}}^{(t)}[g]$
+> are correlated across observations within the same group but
+> independent across arms.
+
+> **(O3-CATE) Comparator against external meta-learners.** Sub-phase
+> 8.5.B will add `gdpar_compare_meta_learners` as an opt-in benchmark
+> against `grf`, `causalForest`, and EconML (via `reticulate`). The
+> charter of 8.5.B is opened only after 8.5.A closes; the dependency
+> on Python (EconML) is the principal architectural reason for the
+> sub-division.
+
+> **(O4-CATE) S-learner and X-learner AMM-side.** Both meta-learners
+> map naturally to the AMM pipeline: S-learner adds $T$ as a covariate
+> in a single AMM specification and reads the CATE from the contrast
+> between $T = 1$ and $T = 0$; X-learner imputes counterfactual
+> outcomes by cross-arm prediction and refits. Both are queued for
+> Block 9. The functions will be `gdpar_causal_s_learner` and
+> `gdpar_causal_x_learner`.
+
+> **(O5-CATE) Doubly-robust and double-machine-learning AMM-side.** DR
+> and DML add a propensity-score model that the T-learner does not
+> require. The propensity-score model can be a separate `gdpar` fit on
+> the binary outcome $T_i$, or an external estimator passed via an
+> argument. Queued for Block 9.
+
+> **(O6-CATE) Diagnostics for the bridge.** A bridge-specific diagnostic
+> battery (overlap plots, posterior-predictive checks per arm, ATE
+> sensitivity to leave-one-out exclusion) would complement the existing
+> per-fit diagnostics. The diagnostic module would consume a
+> `gdpar_causal_bridge` object. Queued for Block 9.
+
+---
+
+# **Appendix A. Notational correspondence with Kuenzel et al. (2019)**
+
+For readers familiar with the meta-learner literature, the following
+table maps Kuenzel et al.'s notation to the AMM-side construction of
+this addendum. Items marked "n/a" are concepts of Kuenzel et al. that
+have no direct AMM-side analog or that are deferred to a later
+sub-phase.
+
+| Kuenzel et al. (2019) | This addendum (gdpar) |
+|:----------------------|:----------------------|
+| Base learner $M_t$ | `fit_treat` and `fit_ctrl` (a pair of `gdpar_fit` objects) |
+| T-learner construction $\widehat\tau_T(x) = M_1(x) - M_0(x)$ | `gdpar_causal_bridge(fit_treat, fit_ctrl, newdata)` |
+| Plug-in CATE estimate | `bridge$cate_mean` |
+| Bootstrap or asymptotic CI for CATE | Posterior credible bounds `bridge$cate_ci` (per-observation), `summary(bridge)$ate_ci` (marginal ATE) |
+| Cross-arm imputation (X-learner) | n/a in 8.5.A; queued as (O4-CATE) |
+| Propensity-score model | n/a in 8.5.A; queued as (O5-CATE) for DR/DML |
+| Treatment indicator $W_i$ (in their Section 2) | Determined extensionally by membership in `fit_treat$data` or `fit_ctrl$data`; the bridge does not see a treatment indicator |
+
+The correspondence is structural, not numerical: the per-arm point
+estimates of $M_t(x)$ depend on the base learner used (Kuenzel et al.
+use random forests; this addendum uses AMM via gdpar); when the base
+learners coincide the two formulations agree on the CATE.
+
+---
+
+# **Appendix B. Implementation notes for future external comparators (8.5.B preview)**
+
+The bridge is decoupled from any external meta-learner. The principal
+integration points for Sub-phase 8.5.B will be:
+
+(i) **A common evaluation grid.** External meta-learners consume the
+    same `newdata` data frame as `gdpar_causal_bridge` and return a
+    per-observation CATE estimate (typically a vector of length
+    $n_{\text{new}}$ with optional CIs). The 8.5.B comparator wraps
+    each meta-learner in an adapter that returns a list with
+    `cate_mean`, `cate_ci`, and a `method` tag.
+
+(ii) **No assumption on the comparator's posterior.** Most external
+     meta-learners do not produce a posterior; their CIs are obtained
+     by bootstrap or by asymptotic approximation. The 8.5.B comparator
+     does not equate `cate_ci` across methods of different inferential
+     origin; the comparator reports the discrepancy in `cate_mean` and
+     in `cate_ci` separately, leaving the interpretation to the user.
+
+(iii) **No Python dependency in 8.5.A.** The optional EconML integration
+      requires `reticulate` and a working Python environment with
+      EconML installed. The dependency is isolated in Sub-phase 8.5.B's
+      `Suggests` block and does not contaminate the core package
+      `Depends` / `Imports`.
+
+---
+
+# **References cited in this addendum**
+
+- **Holland, P. W.** (1986). Statistics and causal inference.
+  *Journal of the American Statistical Association*, 81(396), 945-960.
+- **Imbens, G. W., and Rubin, D. B.** (2015). *Causal Inference for
+  Statistics, Social, and Biomedical Sciences: An Introduction*.
+  Cambridge University Press.
+- **Kuenzel, S. R., Sekhon, J. S., Bickel, P. J., and Yu, B.** (2019).
+  Metalearners for estimating heterogeneous treatment effects using
+  machine learning. *Proceedings of the National Academy of Sciences*,
+  116(10), 4156-4165.
+- **Rubin, D. B.** (1974). Estimating causal effects of treatments in
+  randomized and non-randomized studies. *Journal of Educational
+  Psychology*, 66(5), 688-701.
+
+---
+
+*End of Theoretical Addendum -- Block 8.5.A.*

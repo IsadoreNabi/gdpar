@@ -1,0 +1,663 @@
+---
+title: "**Arbitrary `p`: Operational Cookbook for Multivariate Fits**"
+subtitle: "Building, fitting, predicting, and reporting AMM models with `p > 1` (Path 1)"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Arbitrary p: Operational Cookbook for Multivariate Fits}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  collapse = TRUE, comment = "#>"
+)
+have_cmdstan <- requireNamespace("cmdstanr", quietly = TRUE)
+```
+
+---
+
+# **1. What this vignette covers**
+
+The canonical AMM decomposition fitted by Path 1 of **gdpar** generalises from a scalar individual parameter $\theta_i \in \mathbb{R}$ to a vector $\theta_i \in \mathbb{R}^p$:
+
+$$\theta_i[k] = \theta_{\text{ref}}[k] + a_k(x_i) + b_k(x_i)\,\theta_{\text{ref}}[k] + \bigl(W_k(\theta_{\text{ref}}) - W_k(\theta_{\text{anchor}})\bigr)\,x_i, \qquad k = 1, \ldots, p,$$
+
+stacked across $k$, this is the vector form
+
+$$\theta_i = \theta_{\text{ref}} + a(x_i) + b(x_i) \odot \theta_{\text{ref}} + \bigl(W(\theta_{\text{ref}}) - W(\theta_{\text{anchor}})\bigr)\,x_i,$$
+
+where $\odot$ denotes the Hadamard (elementwise) product, coherent with the canonical notation of `vignette("v00_framework_overview", package = "gdpar")` §8.2 and `vignette("v01_amm_identifiability", package = "gdpar")` §3.3.
+
+The package factorises the likelihood across coordinates (architectural Option B canonised in Phase F of Block 5.2):
+
+$$p(y_i \mid \theta_i) = \prod_{k=1}^{p} D_k\bigl(y_{ik} \mid \theta_i[k]\bigr),$$
+
+with cross-dimensional coupling carried exclusively by the modulating component $W(\theta_{\text{ref}})$. The additive component $a_k$ and the multiplicative component $b_k$ depend only on the covariates $x_i$ and therefore factorise per coordinate; declaring them per coordinate is the user's responsibility and is what the multivariate API of `amm_spec()` enforces.
+
+This vignette is the operational cookbook for $p > 1$ fits. It documents:
+
+1. The four construction paths for a multivariate `amm_spec`: direct, with `dimwise()` + `override()`, with the chainable `amm_build()` helper, and the canonical serialised form via `amm_save_spec()` / `amm_load_spec()`.
+2. The multivariate family `gdpar_family_multi()`, its auto-promotion semantics, and the homogeneous-family restriction of the current release.
+3. The modulating component on a multivariate spec: `W_basis(..., p = ...)` materialisation, the structural asymmetry between `a` / `b` and `W`, and the separable polynomial / B-spline default.
+4. The full call cycle of `gdpar()` for `p > 1`: outcome layout as a matrix column, `parametrization = "auto"` together with `parametrization_aggregation`, and the per-coordinate pre-flight report.
+5. Extracting predictions and coefficients: `predict()` returning a three-dimensional array, `coef()` returning the unified `gdpar_coef` class, and `as.data.frame()` for downstream `dplyr` / `ggplot2` pipelines.
+6. A runnable end-to-end smoke fit with `p = 2`.
+7. A short sub-section showing how to read the pre-flight calibration report produced by `inst/benchmarks/scripts/report_hit_rate_multi.R` so that users can build their own scenario-driven calibration workflows.
+8. Known limitations and pointers to the planned multi-parametric extension (Block 8).
+
+For the underlying canonical form, identifiability, and the cross-dimension condition C4-bis, see `vignette("v01_amm_identifiability", package = "gdpar")`. For the scalar parametrization toggle and the three-filter pre-flight diagnostic, see `vignette("vop01_parametrization_toggle", package = "gdpar")`. The asymptotic theory of Path 1 lives in `vignette("v04_asymptotics_path1_bayesian", package = "gdpar")`.
+
+---
+
+# **2. Building a multivariate spec**
+
+A multivariate spec differs from the scalar spec in one structural axis only: the per-dimension components `a` and `b` are supplied via the `dims` argument of `amm_spec()`, not via the top-level `a` and `b` arguments. The package rejects mixing the two paths in either direction (`amm_spec(p = 2L, a = ~ x1)` and `amm_spec(p = 1L, dims = ...)` both abort with an informative error). The modulating component `W` remains a single top-level argument regardless of `p`, because it depends on the full $\theta_{\text{ref}}$ vector and therefore couples the dimensions.
+
+## **2.1. Direct construction with `dimwise()`**
+
+When every coordinate of $\theta_i$ shares the same additive and multiplicative bases (the most common case), wrap the common formulas with `dimwise()` and pass the result as `dims`:
+
+```{r build-uniform, eval=TRUE}
+library(gdpar)
+
+spec_uniform <- amm_spec(
+  p    = 2L,
+  dims = dimwise(a = ~ x1 + x2, b = ~ x1),
+  W    = W_basis(type = "polynomial", degree = 2)
+)
+print(spec_uniform)
+```
+
+The printer reports the AMM level, `p`, the per-coordinate `a` and `b` formulas (resolved from the uniform template), and the modulating basis. The internal slot `spec_uniform$dims` is a length-`p` list whose entries each carry an `a` and a `b` formula; bare formula values passed to `dims` are rejected to prevent silent recycling.
+
+## **2.2. Per-dimension overrides with `override()`**
+
+When one or more coordinates need a different additive or multiplicative basis, layer `override()` on top of `dimwise()`:
+
+```{r build-override, eval=TRUE}
+spec_mixed <- amm_spec(
+  p    = 3L,
+  dims = dimwise(a = ~ x1 + x2, b = ~ x1) |>
+           override(k = 2L, a = ~ x1) |>
+           override(k = 3L, b = NULL),
+  W    = W_basis(type = "polynomial", degree = 2)
+)
+print(spec_mixed)
+```
+
+The semantics of "unchanged" versus "disabled" is encoded by `missing()` inside `override()`: omitting the argument inherits from the base, while passing `NULL` explicitly disables the component for that coordinate only. Multiple `override()` calls compose; calling `override()` twice with the same `k` replaces the previous override for that index.
+
+## **2.3. Chainable construction with `amm_build()`**
+
+For programmatic construction (loops, generators, serialisation pipelines), the chainable `amm_build()` helper exposes the same semantics as `dimwise()` + `override()`:
+
+```{r build-chainable, eval=TRUE}
+spec_chain <- amm_build(p = 3L) |>
+  amm_set_a_uniform(~ x1 + x2) |>
+  amm_set_a(k = 2L, ~ x1) |>
+  amm_set_b_uniform(~ x1) |>
+  amm_set_b(k = 3L, NULL) |>
+  amm_set_W(W_basis(type = "polynomial", degree = 2)) |>
+  amm_set_x_vars(c("x1", "x2")) |>
+  as_amm_spec()
+print(spec_chain)
+```
+
+The chain is functionally equivalent to the direct construction of Section 2.2; `as_amm_spec()` finalises the builder by validating coherence and forwarding to `amm_spec()` on the appropriate path. Overrides accumulated via `amm_set_a()` / `amm_set_b()` survive subsequent calls to `amm_set_a_uniform()` / `amm_set_b_uniform()`, mirroring the composition behaviour of `dimwise() |> override()`.
+
+## **2.4. Canonical serialisation: `amm_save_spec()` and `amm_load_spec()`**
+
+The canonical file format is a small `key: value` grammar with a mandatory version header. Round-trip is bit-exact for polynomial and B-spline bases; user-defined W bases are rejected (their evaluator is an arbitrary R function that cannot be canonised). Parsing is purely lexical; no `source()` or `eval()` runs on the file contents, so loading from untrusted locations is safe.
+
+```{r serialize, eval=TRUE}
+tmp <- tempfile(fileext = ".gdpar")
+amm_save_spec(spec_uniform, tmp)
+cat(readLines(tmp), sep = "\n")
+
+spec_roundtrip <- amm_load_spec(tmp)
+identical(spec_uniform$level, spec_roundtrip$level)
+```
+
+The serialised form records constructor inputs only, not derived state. In particular, a `W_basis` that was materialised at a specific $p$ via `W_basis(..., p = ...)` is serialised as the equivalent unmaterialised basis; reconstruction at `gdpar()` time re-applies `materialize_W_basis()` with the `p` of the loaded spec.
+
+---
+
+# **3. Multivariate families: `gdpar_family_multi()`**
+
+The multivariate family declares one univariate family per coordinate of $\theta_i$. The current release of Path 1 restricts the per-coordinate families to a homogeneous set (all entries must share the same `stan_id`); heterogeneous families per coordinate are deferred to a later sub-phase.
+
+## **3.1. Construction**
+
+Three input forms are accepted:
+
+```{r families, eval=TRUE}
+fam_mv1 <- gdpar_family_multi("gaussian", p = 2L)
+print(fam_mv1)
+
+fam_mv2 <- gdpar_family_multi(gdpar_family("poisson"), p = 3L)
+print(fam_mv2)
+
+fam_mv3 <- gdpar_family_multi(
+  list(
+    gdpar_family("gaussian"),
+    gdpar_family("gaussian")
+  ),
+  p = 2L
+)
+print(fam_mv3)
+```
+
+The first form (name string) is the most common; the second wraps an existing `gdpar_family` object; the third supplies an explicit list, useful when you want to vary the link function across coordinates in a future heterogeneous-family release while keeping today's homogeneous-family code working.
+
+## **3.2. Auto-promotion**
+
+When `gdpar()` is called with `amm$p > 1L` and a univariate `gdpar_family` object, the function auto-promotes the family to `gdpar_family_multi(family, p = amm$p)` and emits an informational message (`gdpar_family_promotion_message`). The convenience saves typing in interactive use; production scripts that need silence can pass an explicit `gdpar_family_multi` or wrap the call in `suppressMessages()`.
+
+```{r promotion-illustrative, eval=FALSE}
+fit <- gdpar(
+  formula = y ~ x1 + x2,
+  family  = gdpar_family("gaussian"),  # auto-promoted to gdpar_family_multi
+  amm     = amm_spec(p = 2L,
+                     dims = dimwise(a = ~ x1 + x2)),
+  data    = df
+)
+# Informational message emitted (class gdpar_family_promotion_message):
+#   "Auto-promoted univariate family 'gaussian' to gdpar_family_multi
+#    via gdpar_family_multi(family, p = 2) because amm$p > 1.
+#    Pass an explicit gdpar_family_multi to silence."
+```
+
+## **3.3. Constraints**
+
+The current release enforces two coherence invariants that abort `gdpar()` before sampling:
+
+- `family$p` must equal `amm$p` when a `gdpar_family_multi` is supplied explicitly.
+- All per-coordinate families must share the same `stan_id` and link function (homogeneous case).
+
+A `gdpar_family_multi` supplied to a spec with `amm$p` NULL or 1 is rejected with `gdpar_input_error`; the reverse mismatch (univariate family with `amm$p > 1L`) triggers the auto-promotion described in Section 3.2.
+
+---
+
+# **4. The modulating component for `p > 1`**
+
+The asymmetry between per-dimension components (`a`, `b`) and the cross-dimension component (`W`) is what makes the canonical AMM form expressive beyond the separable sub-class. The package therefore reflects this asymmetry at the API level: `dims` for `a` and `b`, a single top-level `W` argument for $W$.
+
+## **4.1. Materialisation at a given `p`**
+
+The polynomial and B-spline bases are separable: each coordinate of $\theta_{\text{ref}}$ contributes an independent block of basis functions, concatenated in coordinate order. The total basis dimension and per-coordinate block indices are computed by `materialize_W_basis()`. This can run either eagerly at construction time (when `p` is supplied) or lazily inside `gdpar()`:
+
+```{r W-materialize, eval=TRUE}
+wb_poly_p2 <- W_basis(type = "polynomial", degree = 2, p = 2L)
+print(wb_poly_p2)
+wb_poly_p2$block_indices
+
+wb_bs <- W_basis(type = "bspline", degree = 3, df = 4, p = 2L)
+print(wb_bs)
+wb_bs$block_indices
+```
+
+The `block_indices` slot is a length-`p` list whose `k`-th entry holds the row indices of the basis output that correspond to coordinate `k` of $\theta_{\text{ref}}$. For polynomial bases of degree `degree`, every block has length `degree`; for B-spline bases, every block has length `df` (or `length(knots) + degree` if `knots` is supplied instead of `df`).
+
+## **4.2. Splitting a separable basis with `as_per_k()`**
+
+For introspection and per-coordinate diagnostics, `as_per_k()` returns a length-`p` list of univariate `W_basis` objects describing the contribution of each coordinate:
+
+```{r W-per-k, eval=TRUE}
+subs <- as_per_k(wb_poly_p2)
+length(subs)
+subs[[1L]]$dim
+subs[[2L]]$dim
+```
+
+For user-defined W bases (`type = "user"`), `as_per_k()` returns `NULL` and emits a warning: the package cannot infer separability from an arbitrary R evaluator. Callers that need a per-coordinate decomposition for a user basis must construct it explicitly.
+
+## **4.3. Why W stays top-level**
+
+Declaring `W` per coordinate would silently restrict the model class to the separable sub-class:
+
+$$W(\theta_{\text{ref}}) x = \sum_{k=1}^{p} W_k(\theta_{\text{ref}}[k])\,x \quad \text{(separable)},$$
+
+losing the cross-dimensional coupling that gives the AMM hierarchy its expressive power. The polynomial and B-spline bases are separable by construction, but they materialise as a single $W$ object whose internal block structure is recorded in `block_indices`. Replacing this single object by a length-`p` list of independent bases is what the package refuses at construction time. The non-separable extension (cross-coupling polynomials and Gaussian-process priors on $W$) is on the roadmap; the current API is forward-compatible.
+
+---
+
+# **5. Calling `gdpar()` for `p > 1`**
+
+## **5.1. Outcome layout**
+
+The outcome must be a matrix column of `data` with `ncol(y) == p`. Two equivalent constructions:
+
+```{r outcome-illustrative, eval=FALSE}
+df$y <- cbind(y1, y2)              # matrix column added to existing df
+# or
+df <- data.frame(x1 = ..., x2 = ...)
+df$y <- y_matrix                   # y_matrix is a numeric matrix n x p
+```
+
+A vector outcome aborts with an informative `gdpar_input_error`. A matrix with `ncol(y) != amm$p` aborts as well. The package never imputes missing values: any `NA` in the outcome matrix aborts before sampling.
+
+## **5.2. Parametrization aggregation**
+
+For `p > 1`, the pre-flight diagnostic is run per coordinate (Path B' applied to each $\theta_{\text{ref}}[k]$ independently). The per-coordinate decisions are aggregated to a per-component decision via the new argument `parametrization_aggregation`:
+
+| Strategy | Behaviour | When to use |
+|---|---|---|
+| `"any_ncp"` (default) | Component is CP only when *every* coordinate's decision is CP. A single NCP flips the component-wide decision to NCP. Conservative. | Default. NCP geometry is monotonically safer in the worst case (more warmup steps in high-info, fewer divergences in low-info). |
+| `"majority"` | Component is CP if the strict majority votes CP. Ties break toward NCP. | When per-coordinate decisions are expected to be near-uniform and you want the dominant signal. |
+| `"per_k"` | No aggregation; each coordinate keeps its own CP/NCP at the Stan-template level via `segment()`-based priors (Phase H.2 of Block 5.2). | When coordinates have markedly different information regimes; needs the per-k Stan template wiring active. |
+
+The argument is ignored for the univariate path (`amm$p == 1L`). The full per-coordinate report is stored at `fit$parametrization$report` as an object of class `gdpar_preflight_report`.
+
+## **5.3. Full call signature for the multivariate path**
+
+```{r gdpar-illustrative, eval=FALSE}
+fit <- gdpar(
+  formula                     = y ~ x1 + x2,
+  family                      = gdpar_family_multi("gaussian", p = 2L),
+  amm                         = spec_uniform,
+  data                        = df,                # df$y is n x 2 matrix column
+  parametrization             = "auto",            # runs per-coord preflight
+  parametrization_aggregation = "any_ncp",         # default; conservative
+  iter_warmup                 = 1000L,
+  iter_sampling               = 1000L,
+  chains                      = 4L,
+  seed                        = 42L
+)
+```
+
+The user-facing arguments are the same as the scalar path; the multivariate dispatch is internal and based on `amm$p > 1L`. All scalar-path arguments (`anchor`, `skip_id_check`, `adapt_delta`, `max_treedepth`, `refresh`, `verbose`, `seed`, `parametrization_a`, `parametrization_W`) are honored identically on the multivariate path.
+
+---
+
+# **6. Inspecting the pre-flight report**
+
+The S3 class `gdpar_preflight_report` bundles per-coordinate, per-component CP/NCP decisions together with an aggregated per-component summary. Access it via the exported accessors `preflight_per_dim()` and `preflight_global_decision()`, or via the S3 methods `print()`, `summary()`, `as.data.frame()`, and `format()`.
+
+```{r preflight-shape, eval=FALSE}
+# After the fit:
+rep <- fit$parametrization$report   # gdpar_preflight_report
+print(rep)                           # default: level = "global"
+print(rep, level = "dim")            # per-coordinate detail
+print(rep, level = "both")           # global + per-coord
+
+preflight_per_dim(rep)               # tidy data.frame, one row per (component, dim)
+preflight_global_decision(rep)       # one row per component
+as.data.frame(rep)                   # same as preflight_per_dim()
+summary(rep)                         # named list with aggregates
+```
+
+The per-coordinate table has columns `(component, dim, decision, decision_reason, n_divergent, div_pct, ebfmi_min, t_attribution, t_info_cp, t_info_ncp)`. The `decision_reason` column carries the active-filter code (`filter_attribution`, `filter_ebfmi`, `filter_info_high`, `filter_info_low`, `filter_info_ambiguous_ncp`, `filter_info_undefined_ncp`, `absent_or_degenerate`). The reason codes are consistent with the univariate guide; see `vignette("vop01_parametrization_toggle", package = "gdpar")` Section 4 for the canonical table.
+
+The global table has columns `(component, global_decision, agreement, method)`. The `agreement` column reports the share of effective per-coordinate decisions matching the aggregated `global_decision` (or the modal-decision frequency when `method = "per_k"`). An agreement of 1.0 flags `uniform`; values strictly above 0.5 flag `mixed`; values at or below 0.5 flag `split`.
+
+When per-coordinate decisions for $W$ are heterogeneous (mixed CP / NCP), an informational message of class `gdpar_W_per_k_heterogeneous_message` is emitted at fit time documenting that the current model uses a single global `sigma_W[1]` shared across blocks. The per-coordinate decisions are recorded in the report for auditability; the sampler honors only the aggregated `cp_W`. Block 8 (multi-parametric extension) may promote `sigma_W` to `array[p]` and honor per-coordinate $W$ decisions.
+
+---
+
+# **7. Extracting predictions and coefficients**
+
+## **7.1. `predict()` returns a 3-D array**
+
+For multivariate fits, `predict(fit, ...)` returns a three-dimensional array of shape `(S, n, p)` with dimnames `list(NULL, row_names, paste0("dim_", seq_len(p)))`. Three `type` modes and three `summary` modes mirror the scalar path:
+
+```{r predict-illustrative, eval=FALSE}
+arr <- predict(fit)                                 # type = "theta_i", summary = "draws"
+dim(arr)                                            # (S, n, p)
+
+arr_resp <- predict(fit, type = "response")         # per-coord inverse link applied
+arr_se   <- predict(fit, summary = "mean_se")       # list of p data.frames
+arr_q    <- predict(fit, summary = "quantiles")     # list of p data.frames
+
+arr_new  <- predict(fit, newdata = df_new)          # reconstruct from posterior draws
+```
+
+The reconstruction on new data mirrors exactly the formula encoded in the multivariate Stan template:
+
+$$\eta_{i,k} = \theta_{\text{ref}, k} + Z_{a,k}[i, \cdot] \cdot a_{\text{coef}, k} + Z_{b,k}[i, \cdot] \cdot c_{b, k} + \sum_{j=1}^{W_{\text{per\_k\_dim}}} \bigl(\theta_{\text{ref}, k}^j - \theta_{\text{anchor}, k}^j\bigr)\,W_{\text{raw}}[r_{k,j}, \cdot]\,\sigma_W\,X[i, \cdot]^{\top},$$
+
+with $r_{k,j} = (k - 1) W_{\text{per\_k\_dim}} + j$ and the $\sigma_W$ multiplier present only when the modulating component was sampled in the non-centered parametrization (`cp_W = FALSE`). The internal helper performs the per-coordinate centering via the means recorded at fit time.
+
+## **7.2. `coef()` returns a unified `gdpar_coef` object**
+
+The S3 class `gdpar_coef` provides a single representation for both scalar and multivariate fits. The structure is:
+
+```
+gdpar_coef
+  $p               : integer, the dimension of theta_i
+  $summary_stats   : character vector, c("mean", "q05", "q50", "q95")
+  $theta_ref       : data.frame; cols (k, mean, q05, q50, q95) with p
+                     rows when grouping is inactive (J_groups == 1);
+                     cols (g, k, mean, q05, q50, q95) with J_groups * p
+                     rows when grouping is active
+  $a               : NULL (component absent) or list of length p; each
+                     entry NULL (coord inactive) or data.frame
+                     (term, mean, q05, q50, q95)
+  $b               : same conventions as $a
+  $W               : NULL or list of length p; each entry NULL or
+                     data.frame (basis_idx, x_name, mean, q05, q50, q95)
+  $mu_theta_ref    : NULL when grouping is inactive; data.frame with
+                     cols (k, mean, q05, q50, q95) and p rows under
+                     grouping (per-coord posterior summary of the
+                     hyper-mean shared across groups)
+  $sigma_theta_ref : NULL when grouping is inactive; data.frame with
+                     cols (k, mean, q05, q50, q95) and p rows under
+                     grouping (per-coord posterior summary of the
+                     hyper-scale)
+  $J_groups        : integer, the number of grouping levels (1 when
+                     grouping is inactive)
+  $group_levels    : NULL when grouping is inactive; character vector
+                     of length J_groups with the original group labels
+                     preserved from the data (the integer code in
+                     $theta_ref$g maps to group_levels[g])
+```
+
+For scalar fits (`p = 1`), the per-component slots are length-1 lists, not bare data.frames. This unification is deliberate: downstream code does not need to bifurcate on `p == 1` versus `p > 1`.
+
+Under grouping (`J_groups > 1`; see `vignette("vop03_grouped_anchors", package = "gdpar")` for the public API and the canonical use cases), the `theta_ref` data.frame gains an integer column `g` running over the grouping levels, and the hyper-parameter slots `mu_theta_ref` / `sigma_theta_ref` are populated with per-coord posterior summaries (NULL otherwise). The original group labels are preserved verbatim in `group_levels`, so `group_levels[theta_ref$g]` recovers them.
+
+In the multivariate path, the `W` slot honors `cp_W`: if `cp_W = TRUE`, the centered parametrisation already absorbs the scale and the slot reports `W_raw` directly; if `cp_W = FALSE`, the non-centered draws are multiplied by `sigma_W` per sample before computing quantiles, so the reported coefficients are on the natural modulating scale.
+
+Three S3 methods aid inspection:
+
+```{r coef-illustrative, eval=FALSE}
+cf <- coef(fit)
+print(cf)                                       # level = "global", default
+print(cf, level = "coord")                      # per-coord means only
+print(cf, level = "full")                       # per-coord with full quantiles
+
+summary(cf)                                     # aggregated counts + theta_ref mean
+format(cf)                                      # one-line representation
+```
+
+## **7.3. `as.data.frame()` for tidy pipelines**
+
+The flattener returns a long-tidy data.frame with columns `(component, k, identifier, x_name, mean, q05, q50, q95)`, ready for `dplyr` and `ggplot2`:
+
+```{r asdf-illustrative, eval=FALSE}
+df_coef <- as.data.frame(coef(fit))
+head(df_coef)
+
+# Using dplyr with explicit namespace to avoid library() in vignettes:
+df_coef |>
+  dplyr::filter(component == "a") |>
+  dplyr::group_by(k) |>
+  dplyr::summarise(mean_abs = mean(abs(mean)),
+                   max_q95  = max(q95))
+```
+
+The `identifier` column carries the `term` for the `a` and `b` slots, the `basis_idx` (formatted as a string) for `W`, and `NA` for `theta_ref`. The `x_name` column is `NA` everywhere except for `W` rows.
+
+---
+
+# **8. End-to-end worked example**
+
+A minimal Gaussian smoke fit with `p = 2`, two coordinates of $\theta_i$, two covariates entering both the additive and the modulating components.
+
+```{r smoke-data, eval=have_cmdstan}
+library(gdpar)
+
+set.seed(42L)
+n <- 300L
+df <- data.frame(
+  x1 = rnorm(n),
+  x2 = rnorm(n)
+)
+# True theta_ref = c(0.5, -0.5), beta_a 2x2, sigma_y = 0.3 per coord
+true_theta_ref <- c(0.5, -0.5)
+true_beta_a <- matrix(c(0.8, -0.6,
+                        0.4,  0.7), nrow = 2L, byrow = TRUE)
+y_mat <- matrix(NA_real_, nrow = n, ncol = 2L)
+for (k in seq_len(2L)) {
+  y_mat[, k] <- true_theta_ref[k] +
+                true_beta_a[k, 1L] * df$x1 +
+                true_beta_a[k, 2L] * df$x2 +
+                rnorm(n, sd = 0.3)
+}
+df$y <- y_mat
+str(df)
+```
+
+The spec uses a uniform additive basis across both coordinates (each $\theta_i[k]$ depends on `x1` and `x2`):
+
+```{r smoke-spec, eval=have_cmdstan}
+spec <- amm_spec(
+  p    = 2L,
+  dims = dimwise(a = ~ x1 + x2)
+)
+print(spec)
+```
+
+The fit with `parametrization = "auto"` runs the per-coordinate pre-flight, aggregates with the conservative default `"any_ncp"`, and proceeds to the long fit. Short iteration counts are used here for vignette responsiveness; production calibration should match the defaults of the calibration scripts (`iter_warmup = 1000`, `iter_sampling = 1000`, `chains = 2-4`).
+
+```{r smoke-fit, eval=have_cmdstan}
+fit <- gdpar(
+  formula                     = y ~ x1 + x2,
+  family                      = gdpar_family("gaussian"),  # auto-promoted
+  amm                         = spec,
+  data                        = df,
+  parametrization             = "auto",
+  parametrization_aggregation = "any_ncp",
+  iter_warmup                 = 300L,
+  iter_sampling               = 300L,
+  chains                      = 2L,
+  refresh                     = 0L,
+  verbose                     = FALSE,
+  seed                        = 42L
+)
+print(fit)
+```
+
+The print method reports the AMM level, `p`, the anchor vector, observation count, identifiability pass, and the convergence verdict together with R-hat / ESS / divergent summaries.
+
+```{r smoke-params, eval=have_cmdstan}
+fit$parametrization$cp_a
+fit$parametrization$cp_W
+fit$parametrization$cp_a_per_k
+fit$parametrization$cp_W_per_k
+```
+
+The pre-flight report exposes the per-coordinate decisions and the active filter for each:
+
+```{r smoke-preflight, eval=have_cmdstan}
+rep <- fit$parametrization$report
+print(rep, level = "both")
+```
+
+Coefficient extraction and tidy flattening:
+
+```{r smoke-coef, eval=have_cmdstan}
+cf <- coef(fit)
+print(cf, level = "coord")
+
+df_coef <- as.data.frame(cf)
+head(df_coef, 8L)
+```
+
+Prediction with `summary = "quantiles"` returns a list of `p` data.frames, one per coordinate:
+
+```{r smoke-predict, eval=have_cmdstan}
+q_list <- predict(fit, type = "response", summary = "quantiles")
+length(q_list)
+head(q_list$dim_1, 4L)
+head(q_list$dim_2, 4L)
+```
+
+Diagnostics access via the convenience function:
+
+```{r smoke-diag, eval=have_cmdstan}
+diagnostics(fit)
+```
+
+The fit can be archived together with the spec via `amm_save_spec()`; the spec is the only object needed to re-build the design at load time (the data and the seed reproduce the rest).
+
+---
+
+# **9. Reporting parametrization decisions across scenarios**
+
+For workflows that calibrate the pre-flight against custom scenarios, the package ships two scripts in `inst/benchmarks/`:
+
+- `calibrate_cp_ncp_multi.R` runs `preflight_parametrization_multi()` over a battery of multivariate scenarios (the package ships eight canonical ones covering homogeneous high-info, low-info, mixed per-coordinate, W-only, both-active with overlap, borderline, and `p = 3` heterogeneous). For each scenario, the script also runs a contrastive fit with the alternative parametrisation to measure the divergence delta. Wall-time roughly 15-25 minutes with `cmdstanr` cached.
+- `report_hit_rate_multi.R` reads the resulting CSV (`inst/benchmarks/results/cp_ncp_hit_rate_multi.csv`) and produces a hit-rate summary, a borderline breakdown, a deduplicated table of `n_div_pred` versus `n_div_alt` per scenario, and two `ggplot2` faceted plots written next to the CSV.
+
+The reporter is intended as a template; copy and adapt it for domain-specific scenario batteries.
+
+## **9.1. Reading the CSV directly**
+
+```{r reporter-csv, eval=FALSE}
+csv_path <- system.file(
+  "benchmarks", "results", "cp_ncp_hit_rate_multi.csv",
+  package = "gdpar"
+)
+results <- utils::read.csv(csv_path, stringsAsFactors = FALSE)
+str(results)
+```
+
+The CSV is long-tidy with one row per `(scenario, p, k, component)` combination. The column `regime_truth` is `NA` for borderline scenarios where no ground-truth parametrisation is defined a priori; `hit` is `NA` for those rows. The columns `n_div_pred` and `n_div_alt` are the divergent counts of the predicted and contrastive (alternative) fits.
+
+## **9.2. Hit-rate aggregation**
+
+The reporter aggregates hits per component and per scenario, restricting to rows with a defined truth:
+
+```{r reporter-agg, eval=FALSE}
+sub <- results[!is.na(results$regime_truth) & !is.na(results$hit), ]
+hits_comp <- aggregate(hit ~ component, data = sub,
+                        FUN = function(x) mean(as.logical(x)))
+hits_sc <- aggregate(hit ~ scenario, data = sub,
+                      FUN = function(x) mean(as.logical(x)))
+print(hits_comp)
+print(hits_sc)
+```
+
+The package ships a baseline run where the hit rate is 18 / 18 = 1.00 over the truth-defined rows of the canonical eight scenarios. In the contrastive comparison, `n_div_alt >= n_div_pred` holds for every scenario, confirming empirically that the pre-flight chose the parametrisation with fewer divergences.
+
+## **9.3. Faceted plot**
+
+When `ggplot2` is available, the reporter writes `cp_ncp_hit_rate_multi.png` (facets `scenario ~ component`, fill by hit / miss / borderline) and `cp_ncp_div_pred_vs_alt.png` (dodge per scenario, predicted vs alternative divergences). The relevant chunk is:
+
+```{r reporter-plot, eval=FALSE}
+# Using ggplot2 with explicit namespace to avoid library() in vignettes;
+# the actual reporter at inst/benchmarks/scripts/report_hit_rate_multi.R
+# follows the same convention.
+results$hit_label <- ifelse(
+  is.na(results$hit), "borderline",
+  ifelse(as.logical(results$hit), "hit", "miss")
+)
+ggplot2::ggplot(
+  results,
+  ggplot2::aes(x = factor(k), fill = hit_label)
+) +
+  ggplot2::geom_bar(width = 0.7) +
+  ggplot2::facet_grid(scenario ~ component, scales = "free_x",
+                       space = "free_x") +
+  ggplot2::scale_fill_manual(values = c(
+    "hit"        = "#2c7bb6",
+    "miss"       = "#d7191c",
+    "borderline" = "#fdae61"
+  )) +
+  ggplot2::labs(x = "k (coordinate)", y = "count", fill = "verdict") +
+  ggplot2::theme_minimal()
+```
+
+Users adapting the reporter to their own scenarios should preserve the long-tidy CSV schema (`scenario, p, k, component, regime_truth, regime_pred, hit, decision_reason, n_div_pred, n_div_alt, ebfmi_min, t_attr, t_info_cp, t_info_ncp`) so that the aggregation code keeps working unchanged.
+
+The companion vignette `vop03_regression_testing` documents a complementary tool: the four-layer comparator `gdpar_golden_compare()` that locks the *posterior* of a reference fit so that future runs detect any regression in the sampling-side output. The reporter of this section focuses on the *decision* of the pre-flight; the comparator focuses on the realised draws after the long fit.
+
+---
+
+# **10. PSIS-LOO via `gdpar_loo()`**
+
+The Stan template emits the per-observation log-likelihood as a generated quantity (`log_lik[i, k]` for `p > 1`, `log_lik[i]` for `p = 1`). The helper `gdpar_loo()` wraps these draws into the `loo::loo()` workflow and returns the standard `psis_loo` object with `elpd_loo`, its standard error, and the Pareto-$k$ diagnostics.
+
+## **10.1. Default aggregation: per-subject**
+
+For `p > 1`, the observational unit is the row (subject) of the input data. Following the coord-wise factorisation $p(y_i \mid \theta_i) = \prod_k D_k(y_{ik} \mid \theta_i[k])$, the per-subject log-likelihood is $\log p(y_i \mid \theta_i) = \sum_k \log p(y_{ik} \mid \theta_i[k])$. This is the default `aggregation = "subject"` and it matches the convention used by `brms` multivariate fits with `set_rescor(FALSE)`, so the resulting `elpd_loo` values are directly comparable to per-coordinate competitors aggregated identically.
+
+```{r psis-loo-subject, eval = FALSE}
+fit <- gdpar(
+  formula  = y ~ x1 + x2,
+  family   = gdpar_family_multi("gaussian", p = 2L),
+  amm      = amm_spec(p = 2L, dims = dimwise(a = ~ x1 + x2, b = NULL)),
+  data     = train_df,
+  refresh  = 0L, seed = 42L
+)
+lo <- gdpar_loo(fit)
+print(lo)
+# elpd_loo, se_elpd_loo, Pareto-k summary as in loo::loo
+```
+
+## **10.2. Diagnostic aggregation: per-cell**
+
+`aggregation = "cell"` treats each pair $(i, k)$ as an independent observation, yielding PSIS-LOO over $n \cdot p$ cells. It is useful when Pareto-$k$ mass concentrates in a specific coordinate (a marginally identified component for that dimension), but it conflates subject-level and coordinate-level cross-validation: do not report cell-aggregated `elpd_loo` as comparable to subject-aggregated values from other methods.
+
+```{r psis-loo-cell, eval = FALSE}
+lo_cell <- gdpar_loo(fit, aggregation = "cell")
+sum(lo_cell$diagnostics$pareto_k > 0.7) # per-cell concentration
+```
+
+## **10.3. Pareto-$k$ caveats**
+
+Pareto-$k$ values above 0.7 signal that the PSIS approximation is unreliable for the affected observations. The standard refinements are `loo::loo_moment_match()` (cheap re-weighting) and `loo::reloo()` (per-observation re-fit, expensive). Both accept the `gdpar_loo()` output and the corresponding `fit$fit` cmdstanr object directly.
+
+## **10.4. Experimental status**
+
+`gdpar_loo()` is flagged with `@keywords experimental`. The aggregation rule is stable; the signature may gain additional arguments in future versions (for example `integrand` for non-pointwise predictive quantities).
+
+---
+
+# **11. Known limitations**
+
+## **11.1. Separable W only**
+
+The package-provided $W$ bases (polynomial and B-spline) are separable in the per-coordinate sense described in Section 4.3. Non-separable bases that cross-couple coordinates of $\theta_{\text{ref}}$ require either `W_basis(type = "user", basis_fn = ...)` (with the caveat that `as_per_k()` returns `NULL` for user bases) or the future non-separable extension on the package roadmap.
+
+## **11.2. Per-coordinate heterogeneous families are a future block (per-slot heterogeneity is implemented as of 8.3.7)**
+
+The release enforces that all per-coordinate families of `gdpar_family_multi()` share the same `stan_id` and link function. The package distinguishes two orthogonal kinds of family heterogeneity:
+
+- **Per-coordinate heterogeneity** (`p`-side; e.g., one Gaussian coord and one Poisson coord within a single `gdpar_family_multi()`) is **scoped for a later sub-phase** and is not currently implemented. The list constructor of `gdpar_family_multi(list(...), p = p)` accepts heterogeneous inputs at the API level for forward compatibility, but rejects them at the homogeneity check until the heterogeneous multivariate Stan template lands.
+- **Per-slot heterogeneity** (`K`-side; the $K \geq 2$ distributional-regression slots of a single coord, e.g., a Gaussian fit with `K = 2` slots where slot 1 carries the mean and slot 2 carries the log-scale, possibly with different links and even different `stan_id`s such as `lognormal_loc_scale` accessed via `gdpar_family_custom_K()`) **is implemented as of Sub-phase 8.3.7** via the named-list public API on the `family` argument of `gdpar()`. See `vignette("vop04_amm_intermediate", package = "gdpar")` §3 for the per-slot heterogeneous recipe and the Stan helper `apply_inv_link_by_id(link_id, eta)` (canonised in `inst/stan/amm_distrib_K.stan:228`) that dispatches the per-slot inverse link.
+
+## **11.3. Single global `sigma_W` shared across blocks**
+
+The multivariate Stan template uses one `sigma_W[1]` shared across all $W$ blocks. When the pre-flight per-coordinate decisions for $W$ are heterogeneous, the package emits a `gdpar_W_per_k_heterogeneous_message` documenting that the sampler honors only the aggregated `cp_W`. The per-coordinate decisions remain in the report for auditability. Promotion of `sigma_W` to `array[p]` is scoped for Block 8 (multi-parametric extension) together with the related per-coordinate prior policy.
+
+## **11.4. Multi-parametric extension is a future block**
+
+The factorisation $p(y_i \mid \theta_i) = \prod_k D_k(y_{ik} \mid \theta_i[k])$ canonised here is the coord-wise option (Option B of Phase F). The alternative multi-parametric option (Option A: a single univariate outcome parametrised by the entire vector $\theta_i$, e.g., Gaussian with $\theta_i = (\mu_i, \log\sigma_i)$ in the distributional regression sense) is scoped for Block 8, after the coord-wise validation against TOP3 competitors (Blocks 6-7).
+
+## **11.5. Pre-flight wall-time**
+
+The per-coordinate pre-flight adds roughly 30 % wall-time per `gdpar()` call (one compilation, one short fit with `iter_warmup = iter_sampling = 200`, two chains, `adapt_delta = 0.95`, `max_treedepth = 10`). In production pipelines where this cost is unacceptable, run `parametrization = "auto"` once during prototyping, read the resolved decisions from `fit$parametrization`, and pass them explicitly in subsequent calls via `parametrization_a` / `parametrization_W`.
+
+---
+
+# **12. References and cross-references**
+
+- `vignette("v01_amm_identifiability", package = "gdpar")` — canonical form, identifiability conditions (C1)-(C4), the cross-dimension condition C4-bis for $p > 1$.
+- `vignette("vop01_parametrization_toggle", package = "gdpar")` — scalar parametrization toggle, three-filter pre-flight, reason codes.
+- `vignette("vop03_regression_testing", package = "gdpar")` — the four-layer comparator `gdpar_golden_compare()` and the `gdpar_snapshot_fit()` API, both currently flagged as experimental.
+- `vignette("v04_asymptotics_path1_bayesian", package = "gdpar")` — asymptotic theory of Path 1.
+- `?gdpar`, `?amm_spec`, `?dimwise`, `?override`, `?amm_build`, `?W_basis`, `?as_per_k`, `?gdpar_family_multi`, `?gdpar_check_identifiability`, `?preflight_per_dim`, `?preflight_global_decision`, `?diagnostics`, `?amm_save_spec`, `?amm_load_spec`, `?gdpar_loo`.
+
+- Stan Development Team (2024). *Stan User's Guide*, version 2.35. <https://mc-stan.org/docs/stan-users-guide/>
+- Betancourt, M. and Girolami, M. (2015). Hamiltonian Monte Carlo for hierarchical models. *Current Trends in Bayesian Methodology with Applications*, CRC Press.
+- Carpenter, B., Gelman, A., Hoffman, M. D., Lee, D., Goodrich, B., Betancourt, M., Brubaker, M., Guo, J., Li, P., and Riddell, A. (2017). Stan: A probabilistic programming language. *Journal of Statistical Software*, 76(1).
+- Vehtari, A., Gelman, A., and Gabry, J. (2017). Practical Bayesian model evaluation using leave-one-out cross-validation and WAIC. *Statistics and Computing*, 27(5), 1413-1432.

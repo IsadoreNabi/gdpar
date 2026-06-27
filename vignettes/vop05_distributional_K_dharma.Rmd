@@ -1,0 +1,421 @@
+---
+title: "**Distributional Regression `K > 1` and Residual Diagnostics with DHARMa**"
+subtitle: "Tutorial for fitting per-slot AMM with custom families and validating fits via G1 / G2 / G3 residuals (Path 1)"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Distributional Regression K > 1 and Residual Diagnostics with DHARMa}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  collapse = TRUE, comment = "#>"
+)
+have_cmdstan <- requireNamespace("cmdstanr", quietly = TRUE) &&
+  isTRUE(try(cmdstanr::cmdstan_version(), silent = TRUE) != "")
+have_dharma <- requireNamespace("DHARMa", quietly = TRUE)
+have_bayesplot <- requireNamespace("bayesplot", quietly = TRUE)
+
+# When both cmdstanr and DHARMa are available the §4.1 [dharma-api] chunk is
+# evaluated; it consumes a `fit_K2` that the user-facing recipe in §2.3 declares
+# under `eval = FALSE`. Build a minimal Gaussian K = 2 fit here so the rendered
+# DHARMa section is reproducible end-to-end. The setup chunk is `include = FALSE`
+# so the construction is silent in the rendered vignette.
+fit_K2 <- NULL
+if (have_cmdstan && have_dharma && requireNamespace("gdpar", quietly = TRUE)) {
+  library(gdpar)
+  fit_K2 <- tryCatch({
+    set.seed(2026L)
+    .n_setup <- 60L
+    .x1_setup <- rnorm(.n_setup)
+    .x2_setup <- rnorm(.n_setup)
+    .mu_setup <- 0.4 + 0.6 * (.x1_setup - mean(.x1_setup))
+    .ls_setup <- -0.2 + 0.4 * (.x2_setup - mean(.x2_setup))
+    .y_setup <- rnorm(.n_setup, .mu_setup, exp(.ls_setup))
+    .d_setup <- data.frame(y = .y_setup, x1 = .x1_setup, x2 = .x2_setup)
+    gdpar(
+      gdpar_bf(y ~ a(x1), sigma ~ a(x2)),
+      data          = .d_setup,
+      family        = gdpar_family("gaussian"),
+      chains        = 2L,
+      iter_warmup   = 200L,
+      iter_sampling = 200L,
+      refresh       = 0L,
+      show_messages = FALSE
+    )
+  }, error = function(e) NULL)
+}
+have_fit_K2 <- !is.null(fit_K2)
+```
+
+---
+
+# **1. What this vignette covers**
+
+`gdpar` supports per-slot AMM canonical decomposition for *distributional regression* — that is, fitting one AMM per parameter of a distribution (`K > 1`). Sub-phases 8.3.4 through 8.3.7 brought online the following library of `K > 1` likelihoods:
+
+- **Bi-parametric** (`K = 2`): Beta, Gamma, log-normal (location-scale), Gaussian.
+- **Tri-parametric** (`K = 3`): Student-t (location, scale, degrees of freedom), Tweedie (location, dispersion, power index in $(1.01, 1.99)$).
+- **Mixtures**: zero-inflated Poisson (ZIP, `K = 2`), zero-inflated negative binomial (ZINB, `K = 3`), Hurdle-Poisson (`K = 2`), Hurdle-negative-binomial (`K = 3`).
+- **Heterogeneous families per slot** (`K = 2` combinations of compatible families; see `vignette("vop04_amm_intermediate", package = "gdpar")`).
+
+This vignette covers two complementary topics:
+
+1. The API for declaring and fitting a `K > 1` model.
+2. The residual / posterior-predictive workflow that complements the fit, including the optional integration with the `DHARMa` package.
+
+For the intermediate AMM specifications (B-spline `W` bases, heterogeneous families per slot), see `vignette("vop04_amm_intermediate", package = "gdpar")`.
+
+---
+
+# **2. The `K > 1` API**
+
+## **2.1. Three equivalent input forms**
+
+`gdpar()` accepts three syntactically equivalent ways of declaring a `K > 1` distributional regression. All three canonicalise to the same internal `gdpar_formula_set` object (sub-phase 8.3.3, decision E):
+
+```{r api-three-forms, eval=FALSE}
+library(gdpar)
+
+# (a) brms-style `bf()` sugar
+fit <- gdpar(
+  gdpar_bf(y ~ a(x1), sigma ~ a(x2)),
+  data = d, family = gdpar_family("gaussian")
+)
+
+# (b) Named list of formulas
+fit <- gdpar(
+  list(mu = y ~ a(x1), sigma = ~ a(x2)),
+  data = d, family = gdpar_family("gaussian")
+)
+
+# (c) Named list of amm_spec (low-level, bypasses formula parsing)
+fit <- gdpar(
+  list(
+    mu    = amm_spec(a = ~ x1),
+    sigma = amm_spec(a = ~ x2)
+  ),
+  data = d, family = gdpar_family("gaussian")
+)
+```
+
+Three contract notes:
+
+- The slot names of the `gdpar_formula_set` must match the *eligible* `param_specs` of the family. For `gaussian`, the eligibles are `{mu, log_sigma}`; the alias `sigma` is canonicalised to `log_sigma` at construction time. For other families see `gdpar_family(name)$param_specs`.
+- The left-hand-side response `y` appears only in the first formula (the observation slot, slot 1). Subsequent slots use one-sided formulas (`~ a(x2)`).
+- Suppressing the anchor via `- 1` or `+ 0` is an error: `gdpar` canonicalises `theta_ref` as a structural anchor, not as an optional parameter (sub-phase 8.3.3, decision 5).
+
+## **2.2. Choosing `K`**
+
+The number of slots `K` is determined by the input. `K = 1` retains the legacy path; `K = 2` adds dispersion / scale modelling; `K = 3` adds shape / weight modelling. The minimum `K` per family is enforced by `.gdpar_guard_K_below_family_min`:
+
+| Family | `min_K` |
+|---|---|
+| `gaussian`, `poisson`, `bernoulli`, `neg_binomial_2` | 1 |
+| `beta`, `gamma`, `lognormal_loc_scale` | 2 |
+| `student_t`, `tweedie` | 3 |
+| `zip`, `hurdle_poisson` | 2 |
+| `zinb`, `hurdle_neg_binomial_2` | 3 |
+
+A `K = 1` fit on a `beta` family aborts with `gdpar_input_error` pointing to elevation to `K = 2`.
+
+The pattern name `lognormal_loc_scale` is **not part of the enum of `gdpar_family(name)`**: the package registers it as a `K = 2` *custom-family pattern* (canonised in Sub-phase 8.3.4), accessed via `gdpar_family_custom_K(stan_lpdf_id = "lognormal_loc_scale", ...)`. See §2.4 below for the literal recipe.
+
+## **2.3. End-to-end example: Gaussian `K = 2`**
+
+```{r k2-gaussian, eval=FALSE}
+set.seed(2026L)
+n <- 100L
+x1 <- rnorm(n); x2 <- rnorm(n)
+mu_true       <- 0.4 + 0.6 * (x1 - mean(x1))
+log_sigma_eta <- -0.2 + 0.4 * (x2 - mean(x2))
+y <- rnorm(n, mu_true, exp(log_sigma_eta))
+d <- data.frame(y = y, x1 = x1, x2 = x2)
+
+library(gdpar)
+fit_K2 <- gdpar(
+  gdpar_bf(y ~ a(x1), sigma ~ a(x2)),
+  data   = d,
+  family = gdpar_family("gaussian"),
+  chains = 2L, iter_warmup = 400L, iter_sampling = 400L,
+  refresh = 0L
+)
+
+co <- coef(fit_K2)
+co$mu
+co$sigma
+```
+
+`coef.gdpar_fit` for `K > 1` returns a named list of `gdpar_coef` objects (decision E4.A, sub-phase 8.3.10). Each entry follows the scalar `gdpar_coef` contract: posterior summaries of `theta_ref`, the additive `a`, the multiplicative `b`/`c_b`, and the modulating `W`. The modulating block is globally shared across slots (replicated identically in every slot's `W` component).
+
+## **2.4. Custom `K > 1` families via `gdpar_family_custom_K()`**
+
+The constructor `gdpar_family_custom_K()` exposes the K-family custom-pattern registry opened in Sub-phase 8.3.4 of Block 8. Each registered pattern is identified by a `stan_lpdf_id` (the name of a pre-validated Stan `_lpdf` function shipped with the package) and carries its own minimum `K`. The first pattern registered is `lognormal_loc_scale` (`min_K = 2`); subsequent sub-phases extend the whitelist.
+
+Signature:
+
+```{r family-custom-K-signature, eval=FALSE}
+gdpar_family_custom_K(
+  name,                 # character scalar; must not collide with a built-in
+  stan_lpdf_id,         # character scalar; key in the registry
+  did_holds     = TRUE, # logical; user declaration of D-ID
+  did_condition = NULL, # character scalar describing any conditional D-ID
+  did_reference = NULL  # citation supporting did_holds
+)
+```
+
+Literal recipe for `lognormal_loc_scale` (a `K = 2` location-scale family on the log scale; slot 1 carries the location and slot 2 carries the log-scale):
+
+```{r family-custom-K-lognormal, eval=FALSE}
+my_lognorm <- gdpar_family_custom_K(
+  name          = "my_lognormal_K2",
+  stan_lpdf_id  = "lognormal_loc_scale",
+  did_holds     = TRUE,
+  did_reference = "User declaration"
+)
+
+fit_lognorm <- gdpar(
+  gdpar_bf(y ~ a(x1), sigma ~ a(x2)),
+  data   = d,
+  family = my_lognorm,
+  chains = 2L, iter_warmup = 400L, iter_sampling = 400L,
+  refresh = 0L
+)
+```
+
+The user is responsible for asserting that the chosen pattern is identifiable in its parameter (`did_holds = TRUE`); the package does not test identifiability from data, only registers the declaration. Attempting to use an unregistered `stan_lpdf_id` aborts with a `gdpar_input_error` that enumerates the allowed patterns. The general (`K = 1`) custom-family constructor `gdpar_family_custom()` is documented in §6 below.
+
+## **2.5. Prediction**
+
+```{r k2-predict, eval=FALSE}
+# In-sample prediction (theta_i_k draws)
+pred_in <- predict(fit_K2, summary = "mean_se")
+str(pred_in, max.level = 1L)
+
+# Out-of-sample prediction on new covariates
+new_d <- data.frame(x1 = c(-1, 0, 1), x2 = c(-1, 0, 1))
+pred_new <- predict(fit_K2, newdata = new_d, summary = "mean_se")
+str(pred_new, max.level = 1L)
+```
+
+Three points of contract:
+
+- `summary = "draws"` returns the posterior array of shape $(S, n, K)$, with the third dimension named after the slots.
+- `summary = "mean_se"` and `summary = "quantiles"` return a named list of length `K` with one summary data frame per slot.
+- `type = "response"` applies the slot's canonical inverse link from `object$family$param_specs[[k]]$inv_link`. Slot 1 uses the location's primary link; slot $k > 1$ uses its own canonical link (log for `sigma` / `phi`, logit for `pi`, etc.). Applying the location link to all slots indiscriminately would be incorrect, so the implementation iterates the per-slot link.
+- `newdata` on `K > 1` polynomial `W` fits is supported (sub-phase 8.3.10, decision Ruta B + newdata extension). For B-spline `W` on `K > 1` and for grouping (`J_groups > 1`), the function raises `gdpar_unsupported_feature_error` and points to Session 8.4 deudas.
+
+---
+
+# **3. Residual diagnostics: G1 / G2 / G3**
+
+`gdpar` provides three complementary layers of residual diagnostics (sub-phase 8.3.9, decision D4 ranqueada por máxima robustez):
+
+- **G1 — deviance and Pearson residuals.** Canonical frequentist diagnostics, layer 2 of [`feedback-proof-rigor-standards`]. Catch bias and heteroscedasticity. Available per-family closed-form where possible; Pearson-like fallback for mixtures and Hurdle.
+- **G2 — randomized quantile residuals (Dunn-Smyth 1996).** Bayesian-flavoured layer 1 distributional check. Construct the empirical CDF of the posterior-predictive draws at each observation, evaluate the observation's quantile, jitter for discrete responses, and map through `qnorm()` so that residuals are standard normal under the correct model. Sensitive to misspecification of the *whole* distribution, not just the first two moments.
+- **G3 — posterior predictive checks (PPC).** Bayesian layer 3 check. Compare summaries of `y_obs` to summaries of `y_pred` draws via `bayesplot::pp_check.gdpar_fit`. Catches systematic skewness, multimodality, and tail behaviour.
+
+## **3.1. API**
+
+```{r residuals-api, eval=FALSE}
+# G1: deviance and Pearson (frequentist canonical)
+r_dev  <- residuals(fit_K2, type = "deviance")
+r_pear <- residuals(fit_K2, type = "pearson")
+
+# G2: Bayesian quantile residuals (Dunn-Smyth)
+r_q <- residuals(fit_K2, type = "quantile", randomize_seed = 1L)
+
+# Response residuals (y_obs - mean of y_pred draws)
+r_resp <- residuals(fit_K2, type = "response")
+
+head(data.frame(deviance = r_dev, pearson = r_pear,
+                quantile = r_q, response = r_resp))
+```
+
+The signature `residuals.gdpar_fit(object, type, coord = NULL, randomize_seed = NULL, ...)` lets the user pin the randomisation seed for reproducible G2 residuals across runs. For multi-coordinate fits (`p > 1`), `coord` selects which coordinate is summarised.
+
+## **3.2. Posterior predictive draws and PPC**
+
+```{r posterior-predict-api, eval=FALSE}
+# Posterior-predictive draws (S x n matrix for K=1 or K>1 with p=1)
+pp <- gdpar_posterior_predict(fit_K2)
+dim(pp)
+
+# Visual PPCs via bayesplot::pp_check generic
+if (requireNamespace("bayesplot", quietly = TRUE)) {
+  pp_check(fit_K2, type = "dens_overlay", ndraws = 30L)
+}
+```
+
+`gdpar_posterior_predict` is the exported posterior-predictive draws extractor; `pp_check.gdpar_fit` is an S3 method off the `bayesplot::pp_check` generic and supports five PPC types: `dens_overlay`, `hist`, `ecdf_overlay`, `stat`, `intervals`. Loading `bayesplot` makes `pp_check(fit_K2)` work directly; without it the user can still call `pp_check.gdpar_fit(fit_K2)` if `bayesplot` is installed.
+
+---
+
+# **4. DHARMa integration (optional)**
+
+`DHARMa` (Hartig 2024) is a popular R package for residual diagnostics that simulates from the fitted model and constructs scaled residuals on $[0, 1]$ for diagnostic plots and formal tests (uniformity, dispersion, outliers, zero-inflation). `gdpar` integrates with DHARMa via the `gdpar_dharma_object()` exported function, which constructs a `DHARMa` simulationOutput from a `gdpar_fit`. Two points of contract:
+
+- **DHARMa is a `Suggests` dependency, not an `Imports`** (sub-phase 8.3.9, decision E1.A). The package's minimalist `Imports` (currently `{posterior, stats, methods}`) is preserved; DHARMa adds ~10 transitive dependencies (lme4, MASS, qrng) that the user opts into.
+- **Detect-and-use pattern.** `gdpar_dharma_object()` checks `requireNamespace("DHARMa", quietly = TRUE)` and aborts informatively if DHARMa is not installed. Without DHARMa the user can still construct Bayesian quantile residuals via `residuals(fit, type = "quantile")` — the same Dunn-Smyth methodology underlies both paths.
+
+## **4.1. API**
+
+```{r dharma-api, eval=have_fit_K2}
+dh <- gdpar_dharma_object(fit_K2)
+class(dh)
+DHARMa::testResiduals(dh)
+```
+
+The returned object is a standard `DHARMa::createDHARMa()` simulationOutput with:
+
+- `nSim`: number of posterior-predictive draws used for the empirical CDF (default: all available).
+- `simulatedResponse`: matrix of posterior-predictive draws, shape $(n, \text{nSim})$.
+- `observedResponse`: the original `y_obs`.
+- `fittedPredictedResponse`: posterior mean of `y_pred` per observation.
+
+All `DHARMa` post-processing functions (`testUniformity`, `testDispersion`, `testOutliers`, `testZeroInflation`, `plotResiduals`, `plotQQunif`) work off this object.
+
+## **4.2. When to use DHARMa vs the built-in G2**
+
+The two paths agree on methodology (Bayesian randomized quantile residuals à la Dunn-Smyth 1996). They differ in scope:
+
+- **Built-in `residuals(fit, type = "quantile")`** returns the residuals as a numeric vector mapped through `qnorm()` so they are approximately standard normal under the correct model. Useful as input to `qqnorm()`, `shapiro.test()`, or any downstream tool that expects standard-normal residuals.
+- **`gdpar_dharma_object(fit)`** returns the residuals as a `DHARMa` simulationOutput in the $[0, 1]$ scale. Useful when the user wants DHARMa's plotting machinery and the formal tests for over- / under-dispersion, outliers, and zero-inflation.
+
+Both paths are reproducible: pass `randomize_seed` to `residuals()` or set `set.seed()` before `gdpar_dharma_object()`.
+
+---
+
+# **5. Worked example: zero-inflated negative binomial (`K = 3`)**
+
+This example exercises both the mixture-likelihood path of sub-phase 8.3.6 and the residual / DHARMa workflow on a tri-parametric `K = 3` family.
+
+```{r zinb-example, eval=FALSE}
+set.seed(515L)
+n <- 120L
+x1 <- rnorm(n); x2 <- rnorm(n); x3 <- rnorm(n)
+mu_eta    <- 1.0 + 0.5 * (x1 - mean(x1))
+log_phi   <- -0.3 + 0.2 * (x2 - mean(x2))
+logit_pi  <- -1.0 + 0.6 * (x3 - mean(x3))
+mu_true   <- exp(mu_eta)
+phi_true  <- exp(log_phi)
+pi_true   <- 1 / (1 + exp(-logit_pi))
+zero_struc <- rbinom(n, 1, pi_true)
+y_count    <- rnbinom(n, size = phi_true, mu = mu_true)
+y <- ifelse(zero_struc == 1L, 0L, y_count)
+d <- data.frame(y = y, x1 = x1, x2 = x2, x3 = x3)
+
+fit_zinb <- gdpar(
+  gdpar_bf(y ~ a(x1), phi ~ a(x2), pi ~ a(x3)),
+  data   = d,
+  family = gdpar_family("zinb"),
+  chains = 2L, iter_warmup = 600L, iter_sampling = 600L,
+  refresh = 0L
+)
+
+# Per-slot coefficient summary
+co <- coef(fit_zinb)
+names(co)
+co$mu
+co$pi
+```
+
+```{r zinb-residuals, eval=FALSE}
+# G2 quantile residuals — robust to mixture structure when jittering
+# discrete responses is enabled (default for ZIP/ZINB/hurdle).
+r_q <- residuals(fit_zinb, type = "quantile", randomize_seed = 99L)
+hist(r_q, breaks = 20L,
+     main = "Bayesian quantile residuals — ZINB K=3",
+     xlab = "residual")
+
+# DHARMa-side diagnostics if available
+if (requireNamespace("DHARMa", quietly = TRUE)) {
+  dh <- gdpar_dharma_object(fit_zinb)
+  DHARMa::testZeroInflation(dh)
+}
+```
+
+For ZIP / ZINB / Hurdle families, `gdpar` documents the parametrization of `pi` (zero-inflation / hurdle probability) in the logit scale and the default vectorised prior `normal(0, 2.5)` per the canonical decision D6 of sub-phase 8.3.6. The `pi` slot's `coef()` output reports the per-term posterior of the AMM acting on `logit_pi`.
+
+---
+
+# **6. Custom family registry: `gdpar_family_custom()` (`K = 1`)**
+
+The complement to `gdpar_family_custom_K()` of §2.4 is the `K = 1` constructor `gdpar_family_custom()`: it builds a fully user-defined family for the legacy single-slot path, where the user supplies the Stan likelihood, the `log_lik` block (consumed by `gdpar_loo()`), and the posterior-predictive block (consumed by PPC utilities). Unlike the `K`-side custom registry, the `K = 1` constructor does not draw from a curated whitelist of patterns: any mathematically valid likelihood can be passed verbatim, and the user assumes responsibility both for correctness of the Stan code and for the declaration of identifiability.
+
+Signature:
+
+```{r family-custom-signature, eval=FALSE}
+gdpar_family_custom(
+  name,                 # character scalar; must not collide with a built-in
+  link,                 # one of "identity", "log", "logit"
+  did_holds,            # logical; explicit user declaration of D-ID
+  did_condition,        # character scalar (NA_character_ if unconditional)
+  stan_loglik_block,    # Stan snippet for the model block (per-observation
+                        # target += ... ; references eta[i] and y_real[i] or
+                        # y_int[i] per y_type)
+  stan_log_lik_block,   # Stan snippet for generated quantities log_lik[i]
+  stan_y_pred_block,    # Stan snippet for generated quantities y_pred[i]
+  y_type,               # one of "real", "integer"
+  did_reference         # citation supporting did_holds
+)
+```
+
+Literal recipe for a custom log-Normal `K = 1` family (a degenerate one-slot mirror of the `lognormal_loc_scale` pattern of §2.4):
+
+```{r family-custom-lognormal, eval=FALSE}
+my_family <- gdpar_family_custom(
+  name               = "my_log_normal",
+  link               = "log",
+  did_holds          = TRUE,
+  did_condition      = NA_character_,
+  stan_loglik_block  =
+    "target += normal_lpdf(log(y_real[i]) | eta[i], sigma_y[1]);",
+  stan_log_lik_block =
+    "log_lik[i] = normal_lpdf(log(y_real[i]) | eta[i], sigma_y[1]);",
+  stan_y_pred_block  =
+    "y_pred[i] = exp(normal_rng(eta[i], sigma_y[1]));",
+  y_type             = "real",
+  did_reference      = "User declaration"
+)
+```
+
+The package emits an informational message restating the two user responsibilities (likelihood correctness and identifiability) every time a custom family is constructed. See `?gdpar_family_custom` for the full Roxygen and Lemma 1B in Block 1 (§6.4) for the methodological backing of the D-ID declaration.
+
+---
+
+# **7. Known limitations and future work**
+
+- **K > 1 with grouping (`J_groups > 1`).** Both `coef.gdpar_fit` and `predict.gdpar_fit` with newdata raise `gdpar_unsupported_feature_error`. In-sample prediction (`newdata = NULL`) is supported.
+- **K > 1 with B-spline `W` on newdata.** The in-sample path supports B-spline through `apply_W_basis_diff()` in Stan; the R-side reconstruction on new data presently mirrors only the polynomial branch.
+- **Heterogeneous `K = 3+`.** Queued for Session 8.4.
+- **Hurdle continuous families** (`hurdle_gamma`, `hurdle_lognormal`). Queued for sub-phase 8.3.7+ and Session 8.4.
+
+---
+
+# **References**
+
+- Dunn, P. K., & Smyth, G. K. (1996). Randomized quantile residuals. *Journal of Computational and Graphical Statistics*, 5(3), 236--244.
+- Greene, W. H. (1994). Accounting for excess zeros and sample selection in Poisson and negative binomial regression models. *NYU Stern Working Paper EC-94-10*.
+- Hartig, F. (2024). *DHARMa: Residual Diagnostics for Hierarchical (Multi-Level / Mixed) Regression Models*. R package version 0.4.7.
+- Lambert, D. (1992). Zero-inflated Poisson regression, with an application to defects in manufacturing. *Technometrics*, 34(1), 1--14.
+- Mullahy, J. (1986). Specification and testing of some modified count data models. *Journal of Econometrics*, 33(3), 341--365.
+- Wood, S. N. (2017). *Generalized Additive Models: An Introduction with R* (2nd ed.). Chapman and Hall/CRC.

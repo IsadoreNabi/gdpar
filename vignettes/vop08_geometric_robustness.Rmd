@@ -1,0 +1,608 @@
+---
+title: "**Geometric Robustness of Sampling (Block RG)**"
+subtitle: "Diagnosing posterior geometry and climbing a hierarchy of geometry-adaptive samplers"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: true
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+vignette: >
+  %\VignetteIndexEntry{Geometric Robustness of Sampling (Block RG)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  collapse = TRUE, comment = "#>"
+)
+library(gdpar)
+set.seed(1)
+```
+
+> **What this vignette is.** A complete, abundantly documented narrative of
+> **Block RG (Robustness of the Geometry of Sampling)** of `gdpar`: why it
+> exists, every design hinge and the decision taken at it, every validation, and
+> how to use the resulting capability. It is **opt-in**: nothing here changes the
+> default `gdpar()` fit, whose draws stay bit-identical.
+>
+> **Two levels of reproducibility.** The chunks evaluated when this vignette is
+> built are deliberately **cheap** -- they inspect the ladder, the budget, the
+> success criteria and the calibrated thresholds, and they run the geometry
+> *engine* on small **closure** targets in pure R, with no Stan compilation. The
+> **heavy**, `cmdstan`-backed runs (the diagnostic on a compiled model, the full
+> orchestrator, the bridge over a real fit) are shown with `eval = FALSE` for
+> reading, and reproduced end to end by the gated script
+> `inst/scripts/geometry_pilots_deep.R` (set `GDPAR_RUN_GEOMETRY_PILOTS=1`),
+> referenced throughout. This keeps the package build light without hiding the
+> real computation.
+
+# Why this block exists
+
+The block was opened (session B9.21) by a concrete failure. In the external
+re-validation 9.2.O, the **count** coordinate of a bivariate eBird model -- a
+**Tweedie** outcome -- would not converge under the no-U-turn Hamiltonian
+explorer ("NUTS"): split-$\hat R \approx 3$, effective sample size $\approx 2$,
+nonsensical predictive accuracy, more than an hour per fit at high warm-up. A
+three-layer forensic (B9.21) separated two things:
+
+1. **A false culprit, corrected.** The infinite $\hat R$ was produced by
+   per-slot additive scales `sigma_a_k` that were *declared but unused* for
+   distributional slots without an `a()` term (`phi ~ 1`, `p ~ 1`): a **flat
+   direction** (non-identification), a genuine geometric pathology. The fix
+   ("Option A", session B9.30) compacts those scales away (Section
+   \@ref(optiona)); it **cleans the infinite $\hat R$ but does not unstick the
+   Tweedie**.
+2. **The real cause: the intrinsic geometry of the posterior.** The eBird count
+   is *almost entirely explained* by geography and climate, so the posterior is
+   near-deterministic -- the typical set collapses toward a lower-dimensional
+   manifold (a razor-thin canyon), aggravated by the Tweedie shape parameter
+   $p$ pinned against its bound $(1.01, 1.99)$. The competitor `mgcv` wins
+   because it does not *traverse* anything (REML plus a saddlepoint); a
+   Hamiltonian sampler does traverse, and there it jams.
+
+The user's decision was not to patch the case but to give `gdpar`
+**first-class geometric robustness**: a capability that (a) **diagnoses** the
+geometry of a posterior and (b) offers **geometry-adaptive sampling** that climbs
+a hierarchy of geometries -- *Riemannian and beyond, not stopping at the
+Riemannian*. Opt-in, never the default. *"Let us go for the glory."*
+
+## The conceptual bridge (geometry of the user's document ↔ sampling)
+
+The block is grounded in the user's manuscript `ON_RIEMMANIAN_STATISTICS.Rmd`,
+which supplies the ontological-geometric frame and a **hierarchy of geometries**
+(its Part IV, §12). Hamiltonian sampling simulates a conservative dynamics over
+the relief of the log-density; its efficiency depends on how well the **metric**
+("mass" of the system) fits the local shape of that relief. This *is* applied
+Riemannian geometry:
+
+- The sampler's **metric** corresponds to the document's §5 (a smoothly varying
+  family of local inner products; the "local quantitative determination of
+  space"). In inference the canonical choice is the **Fisher information** -- the
+  natural metric of the statistical manifold (Rao--Amari information geometry).
+- **Hamiltonian trajectories** correspond to §6 **geodesics** (curves that "do
+  not deviate from themselves", length extremals, "the natural path determined by
+  the structure of the space").
+- **Curvature / holonomy** (§3.2) is *why a constant metric is not enough* in a
+  funnel: the obstruction to a global flat metric forces a **position-dependent**
+  (fully Riemannian) one.
+- **Near-determinism → lower-dimensional manifold** (the posterior contraction)
+  corresponds to **sub-Riemannian** geometry (§12.4): the effective dynamics
+  lives in a distribution $D_p \subsetneq T_pM$ of accessible directions. *This
+  is exactly our count.*
+- **Heavy tails / directional anisotropy** correspond to **Finsler** geometry
+  (§12.3): a norm $F(p,v)$ that does *not* come from an inner product. In
+  sampling this is a **non-Gaussian, bounded kinetic energy** (relativistic Monte
+  Carlo) that tames the tails.
+
+### An organic critical reading of the source documents
+
+Following the package's standing posture (the user's manuscripts are **input to
+improve in our context, not holy writ**), three points are worth stating plainly.
+
+- **§14 of the manuscript** ("On the use of statistical models") is programmatic:
+  it declares that "the systematic development of the statistical implications of
+  this framework constitutes a *future line of research*." **Block RG is the
+  concrete operationalization of that line**: it turns §12's hierarchy of
+  geometries into a working diagnostic and a working sampler ladder, with the
+  Fisher information as the §5 local inner product and the Hamiltonian
+  trajectories as the §6 geodesics.
+- **We realize sub-Riemannian geometry faithfully but distinctly.** The manuscript
+  motivates it through non-holonomic *reachability* (the Chow--Rashevsky theorem,
+  §12.4: restricted instantaneous directions, yet total reachability). In sampling
+  we read the accessible distribution $D_\theta$ from the **near-null space of the
+  expected Fisher** and integrate the stiff "walls" by their *exact* Gaussian flow;
+  the manuscript's reachability intuition maps to our "typical set on a thinner
+  manifold", but the construction is our own (and Metropolis-exact, so reachability
+  of the full space is preserved by the correction, not assumed).
+- **We deliberately stop where the manuscript keeps going.** Its §12.5
+  (Alexandrov / RCD metric spaces) and §12.6 (fractal geometry, *no tangent
+  space*) describe regimes our differentiable machinery does not cover. We treat
+  multimodality and non-smoothness as **out-of-ladder** remedies (tempering, a
+  general-metric fallback) rather than pretend the geometry ladder solves them
+  (Section \@ref(orchestrator)). Honesty about the boundary is part of the design.
+
+The honesty convention itself we borrow from the companion manuscript
+`A-ORPHEUS-PIMC.Rmd` (§16.3): keep **demonstrated** (correctness) strictly apart
+from **conjectured** (efficiency). Every sampler level below is
+**Metropolis-exact**, so *which* geometry is chosen governs only efficiency, never
+the validity of the draws. The speed-ups are measured, never asserted.
+
+# The taxonomy: pathologies as a hierarchy of geometries
+
+"Hard geometry" is not a scalar but a **taxonomy**, each entry tied to a
+geometric concept and to a remedy (a level of the geometry hierarchy):
+
+| Pathology | Geometric concept | Level / remedy |
+|---|---|---|
+| Isotropy (easy) | identity metric | Euclidean **diagonal** (default) |
+| Anisotropy / elongation (straight canyon) | **constant** non-identity metric | Euclidean **dense** |
+| Funnel / variable curvature | **position-dependent** metric | **Riemannian** (Fisher / SoftAbs) |
+| Heavy tails / directional asymmetry | non-inner-product norm | **Finsler / relativistic** |
+| Near-determinism → lower-dim manifold | distribution $D_p \subsetneq T_pM$ | **sub-Riemannian** |
+| Non-smoothness / multimodality | general metric space | out of ladder (tempering / fallback) |
+| Flat direction (non-identification) | zero Hessian eigenvalue | reparametrize / eliminate (Option A) |
+
+The calibration of the diagnostic that maps a posterior to one of these classes
+is validated against a **synthetic suite of geometries of known difficulty**, the
+eight targets `G0`--`G7` (RG.1). Building the suite is free (no Stan):
+
+```{r suite}
+suite <- gdpar_geometry_suite()
+data.frame(
+  target  = names(suite),
+  pathology = vapply(suite, `[[`, character(1), "pathology"),
+  remedy    = vapply(suite, `[[`, character(1), "geometry_remedy")
+)
+```
+
+Each target ships in **dual** form -- a Stan program (for `cmdstan`-backed
+pilots) and a pure-R closure (log-density and gradient, cross-checked against
+each other to $< 10^{-9}$). The closure side is what makes the engine
+demonstrations below run with no compilation.
+
+# The diagnostic (RG.1): size-invariant signals
+
+The diagnostic runs cheap pilots and reads **signals that are invariant to the
+sample size** -- divergences, the energy fraction of missing information
+("E-BFMI"), tree depth, the condition number, the step-to-scale ratio -- and a
+**difficulty-versus-$n$ curve** that separates near-determinism (which grows with
+$n$) from a structural pathology (constant). It localizes the culprit parameter
+and classifies the pathology with a transparent, calibrated rule-based
+classifier.
+
+> **The decisive lesson (B9.20/B9.21).** The diagnostic **never** uses $\hat R$ or
+> the effective sample size on short runs. The infamous infinite $\hat R$ at
+> warm-up 100 was a *false positive*; the size-invariant signals are the honest
+> ones. This lesson is enforced everywhere downstream, including the success gate
+> of the orchestrator.
+
+The classifier's thresholds were calibrated in RG.1.c over a 540-cell grid (eight
+targets $\times$ three difficulties $\times$ two pilot budgets $\times$
+replicates) with a **minimax adaptive allocation** (a Wilson-interval top-up of
+the unresolved cells). Reporting honestly: the macro accuracy rose from
+$0.78$ to $0.91$ and the held-out balanced accuracy from $0.60$ to $0.89$; six of
+eight classes land at $0.93$--$1.00$, while the **funnel ($0.63$) and the heavy
+tail ($0.71$) remain mutually confusable** -- a real limit that the orchestrator's
+level selection is designed to be robust to. The recalibrated thresholds are
+plain, inspectable data:
+
+```{r thresholds}
+str(gdpar_geometry_thresholds())
+```
+
+Running the diagnostic on a real model is heavier (it compiles and samples), so
+it is shown but not evaluated here:
+
+```{r diag-heavy, eval=FALSE}
+# Reproduced by inst/scripts/geometry_pilots_deep.R (GDPAR_RUN_GEOMETRY_PILOTS=1)
+diag <- gdpar_geometry_diagnostic(suite$G4_quasi_deterministic, n_grid = 3)
+diag$pathology      # "quasi_deterministic"
+diag$culprit        # the localized direction(s)
+```
+
+# The engine and the ladder (RG.2--RG.4)
+
+The motor decision (RG.2, decision **A**) is an integrator written in **R over a
+Stan backend**: the generalized leapfrog, SoftAbs, relativistic and
+sub-Riemannian trajectories live in pure R, delegating the log-density, gradient
+and Hessian to the compiled `cmdstan` model via `$log_prob` / `$grad_log_prob` /
+`$hessian`. Under the cornerstone rule (maximum multidimensional robustness, cost
+irrelevant) this wins: "slow" is only constant-factor R orchestration, opt-in and
+reversible to compiled code, with **zero new external dependency**. The same
+engine runs on the suite's closures, which is what the demonstrations below
+exploit.
+
+The ladder the orchestrator can climb is `{0, 1, 3, 4, 5}`:
+
+## Level 0 -- Euclidean diagonal (the default)
+
+The identity-mass HMC. On a closure target it is pure R. An anisotropic Gaussian
+(precision $\mathrm{diag}(1, 100)$, scales $1$ and $0.1$) is recovered well when
+the elongation is mild:
+
+```{r euclid}
+P   <- diag(c(1, 100))
+tgt <- gdpar_geom_target(
+  log_prob      = function(t) -0.5 * drop(t %*% P %*% t),
+  grad_log_prob = function(t) -drop(P %*% t), dim = 2L)
+
+fit0 <- gdpar_geom_hmc(tgt, gdpar_geom_metric_euclidean(dim = 2L),
+                       n_iter = 400L, n_warmup = 200L, epsilon = 0.12,
+                       L = 20L, seed = 1L)
+c(accept = round(fit0$accept_rate, 3),
+  sd1 = round(sd(fit0$draws[, 1]), 3),   # truth 1
+  sd2 = round(sd(fit0$draws[, 2]), 3))   # truth 0.1
+```
+
+## Level 1 -- Euclidean dense
+
+A **constant** non-identity mass (a linear preconditioner) straightens a tilted
+canyon. It is the right remedy when the elongation is severe but the curvature
+does *not* vary across the space. Construct it from a mass matrix:
+
+```{r dense, eval=FALSE}
+# A dense mass equal to the posterior precision whitens a straight canyon.
+metric_dense <- gdpar_geom_metric_euclidean(M = P)
+```
+
+## Level 3 -- Riemannian (Fisher / SoftAbs, and the learned GP-Fisher)
+
+When curvature **varies with position** (a funnel) a constant metric cannot keep
+up; the metric must depend on $\theta$. Block RG builds this in three
+complementary ways (RG.3):
+
+- **Fisher** where it is closed form (`curvature = "fisher"`), the natural
+  Rao--Amari metric;
+- **SoftAbs** of the observed Hessian (`curvature = "softabs"`, Betancourt 2013),
+  which makes any Hessian positive-definite -- the start-up / extrapolation
+  backstop;
+- a **Gaussian-process learned Fisher** (`gdpar_geom_metric_gp_fisher()`) whose
+  mean function is the SoftAbs and which learns only the *residual* (expected
+  Fisher minus SoftAbs) at reservoir sites, degrading **continuously** to the
+  SoftAbs away from the reservoir and exposing predictive variance as an
+  epistemic-**novelty** detector, plus a simulation estimator of the expected
+  Fisher (`gdpar_geom_fisher_simulator()`, the outer product of the score) with a
+  full active-learning loop (`gdpar_geom_rmhmc_adaptive()`).
+
+The integrator is the **generalized implicit leapfrog** of Girolami--Calderhead;
+the metric is a *preconditioner, not part of the target*, so the Metropolis
+correction with the exact density is the intrinsic repair -- **no delayed
+acceptance is needed** (a deliberate improvement over the ORPHEUS surrogate,
+where the surrogate enters the acceptance). The funnel is the canonical heavy
+demonstration (Section \@ref(appendix)).
+
+## Level 4 -- Finsler / relativistic (heavy tails)
+
+A **bounded, non-Gaussian kinetic energy** coupled to the position-dependent
+Riemannian metric,
+$$K(\theta, p) = c\sqrt{p^\top M(\theta)^{-1}p + m^2c^2} + \tfrac12\log\det M(\theta),$$
+whose velocity has $M$-norm strictly below the speed $c$ -- this is what tames the
+overshoot of heavy tails. The $\tfrac12\log\det M$ normalizer keeps the marginal
+**exact for every $c$ and $m$** (they govern only efficiency), and the
+non-relativistic limit $c \to \infty$ recovers the Riemannian kinetic of Level 3.
+Because the resulting Hamiltonian is **non-separable**, a dedicated generalized
+implicit integrator handles it, routed in opt-in so the default leapfrog stays
+bit-identical. The honest Finsler reading: this kinetic is the Legendre dual of a
+Finsler norm; the asymmetric **Randers** extension $F=\sqrt{g(v,v)}+\beta(v)$ is
+*deliberately deferred* because it is odd in $p$ and would break the
+reversibility Metropolis depends on (it models irreversible dynamics, a different
+goal than sampling a fixed target).
+
+## Level 5 -- sub-Riemannian (the count; "the glory") {#subriem}
+
+The remedy for the near-deterministic posterior. The accessible distribution
+$D_\theta$ is read from the **near-null space of the expected Fisher**; a
+**continuous** spectral filter (no hard cut-off) splits each direction into a soft
+"floor" and a stiff "wall"; a **Strang symplectic splitting** integrates the stiff
+wall by its *exact* harmonic flow (so the wall does not penalize the step at any
+$\varepsilon$) while the soft residual follows free drift, with the Metropolis
+correction on the *true* density keeping the sampling exact (the reference
+Gaussian is an internal device of the integrator). The default threshold is the
+floor scale $\tau = \lambda_{\min}$, so the step is governed by the floor, never
+the walls. On a closure -- a mild canyon with Fisher $\mathrm{diag}(1, 50)$ -- it
+runs in pure R and recovers both scales with no divergences at a step the
+Euclidean sampler could not take:
+
+```{r subriem}
+canyon <- gdpar_geom_target(
+  log_prob      = function(th) -0.5 * (th[1]^2 + 50 * th[2]^2),
+  grad_log_prob = function(th) -c(th[1], 50 * th[2]), dim = 2L)
+
+metric_sr <- gdpar_geom_metric_subriemannian(
+  canyon, fisher = function(th) diag(c(1, 50)))
+
+fit_sr <- gdpar_geom_hmc(canyon, metric = metric_sr, epsilon = 0.5, L = 12L,
+                         n_iter = 800L, n_warmup = 300L, seed = 3L)
+c(accept = round(fit_sr$accept_rate, 3),
+  divergent = fit_sr$n_divergent,
+  floor_sd = round(sd(fit_sr$draws[, 1]), 3),   # truth 1
+  wall_sd  = round(sd(fit_sr$draws[, 2]), 3))   # truth 1/sqrt(50) ~ 0.141
+```
+
+This is the level RG.7 will point at the real Tweedie count, supplying the
+expected Fisher through `gdpar_geom_fisher_simulator()` over the compiled model.
+
+# The orchestrator (RG.5): diagnose → select → sample → re-diagnose → escalate or certify {#orchestrator}
+
+`gdpar_geom_orchestrate()` closes the loop. It **diagnoses** the geometry, **selects**
+an entry level, **samples**, **re-diagnoses**, and either **resolves** or emits a
+**certified limit**. The budget and the multi-signal success gate are tunable
+plain data:
+
+```{r budget}
+str(gdpar_geom_orchestrate_budget())
+str(gdpar_geom_orchestrate_criteria())
+```
+
+The four design hinges (decided by the user, B9.29) and how they are honoured:
+
+- **(a) Level selection -- the combined map.** The transparent, calibrated
+  rule-based classifier is primary; a continuous proximity score is a *second*,
+  independent estimator. When they agree and confidence is high the discrete
+  level is used; when they disagree or confidence is low the controller starts
+  conservatively at the **lower** of the two candidates and lets the escalation
+  climb -- robust precisely at the funnel/heavy-tail border the calibration found
+  confusable. A user `level_map` / `entry_level` override sits on top.
+- **(b) Escalation -- the closed loop, armoured to the maximum.** On failure it
+  re-diagnoses with a fresh pilot and lets the new signature pick the next level,
+  under: a monotone ratchet, a visited-state memo (a provably acyclic walk),
+  per-level and global round caps, a no-progress detector, cost-aware budget
+  admission with cheap-probe-then-full tiering (the successive-halving spirit), a
+  per-fit wall-time watchdog, graceful degradation (always return the best),
+  **deterministic seeding** (a re-run retraces the whole adaptive trajectory
+  identically -- that determinism *is* the resumability guarantee), a multi-signal
+  success gate with hysteresis, a frozen-level final phase, and the
+  capability-subsumption guarantee (level $L+1$ strictly generalizes level $L$).
+- **(c) Certified limit -- evidence ledger plus conjectured prescription.** When
+  the budget is spent without success, the certificate separates, in three rigour
+  layers (algebraic = the geometry, statistical = the per-level sampler
+  diagnostics, numerical = the budget and fits), the **demonstrated** record from
+  a **conjectured**, falsifiable **prescription** (the smallest change the
+  evidence predicts would break the limit), tagged as a conjecture in the sense of
+  ORPHEUS §16.3. *This is how "recognising an honest limit" stops being ad hoc.*
+- **(d) Scope -- standalone with a rich return.** It never touches `gdpar()`; the
+  return carries the winning metric, the ledger and the reproducibility block.
+
+Crucially, the **out-of-ladder** remedies -- multimodality (tempering), boundary
+(reparametrization), flat direction (Option A) -- are **not** sampled (no
+overreach): a diagnosis pointing at them short-circuits to a certificate that
+**names the proper remedy**. The sub-Riemannian level *requires* an expected
+Fisher; without one the certificate prescribes supplying it -- the showcase of an
+actionable prescription. The full orchestration over a compiled model is heavy:
+
+```{r orch-heavy, eval=FALSE}
+# Reproduced by inst/scripts/geometry_pilots_deep.R (GDPAR_RUN_GEOMETRY_PILOTS=1)
+res <- gdpar_geom_orchestrate(suite$G0_isotropic, n_grid = 1)
+res$status     # "resolved" at euclidean_diagonal for the isotropic control
+```
+
+# Option A: the flat direction (RG.6 part i, D96) {#optiona}
+
+The forensic's flat direction is the diana `G7` (remedy `reparam_eliminate`), an
+**out-of-ladder** pathology. Option A removes it at the source: the per-slot
+additive scale `sigma_a_k` is **compacted to the slots that actually carry free
+`a` coefficients** ($J_a^{\text{free}} > 0$), via a `sigma_a_idx` map computed in
+`transformed data`. The criterion is $J_a^{\text{free}} > 0$ (not "an `a()` was
+declared"): it captures *both* sub-cases of the flat direction -- slots with no
+`a()` (the Tweedie's `phi ~ 1` / `p ~ 1`) and an intercept-only `a()`
+(`a = ~ 1`). For every model that carries an `a()` with a covariate in each slot,
+the index is the identity and the model is **mathematically identical** -- the
+draws are bit-exact, which is how the K-path goldens stay green. The single golden
+with an intercept-only slot was re-bootstrapped and validated as a faithful
+**marginalization** (one parameter fewer, no surviving marginal moving beyond
+Monte Carlo error). Option A cleans the infinite $\hat R$; it does **not** unstick
+the Tweedie -- the geometry does (RG.7).
+
+# Integration: the bridge and the one-call fit (RG.6 part ii)
+
+Two opt-in, net-new layers connect the orchestrator to the package fit engine,
+**without touching `gdpar()`**:
+
+- **`gdpar_geom_bridge(object)`** -- the durable, path-agnostic core. It takes an
+  already-fitted `gdpar` object, reads its compiled `cmdstan` model and Stan data,
+  exposes the standalone `log_prob` / `grad_log_prob` / `hessian` methods,
+  derives the unconstrained dimension and a posterior-mean warm-start, and returns
+  the `(target, geom_target, fisher, reference)` tuple `gdpar_geom_orchestrate()`
+  consumes. The diagnostic needs a *re-samplable* model, so the bridge recompiles
+  one from the fit's own Stan source (with the standalone methods); the engine
+  target reuses the fitted object directly. **This is the tool RG.7 points at the
+  real Tweedie.** The Hessian compilation is best-effort: if higher-order autodiff
+  will not compile (custom densities such as the Tweedie `lpdf`), it falls back to
+  gradient-only methods, which still serve the Euclidean, dense and
+  sub-Riemannian (simulated-Fisher) levels.
+- **`gdpar_geom_fit(formula, ...)`** -- the one-call ergonomic entry, a *sister* of
+  `gdpar()` (not an internal branch). It builds and compiles the K-individual
+  model through the **shared seam `.gdpar_K_build()`** -- the same single source
+  `gdpar()` uses, so there is no duplication and no throwaway computation -- then
+  runs the orchestrator. Its scope is the K-individual path (where the Tweedie
+  lives); the multi / single paths can be wired the same way later.
+
+The bridge return is plain data plus closures; you can inspect the engine target
+on a closure with no Stan:
+
+```{r bridge-target}
+geom_target <- gdpar_geom_target(
+  log_prob      = function(t) -0.5 * sum(t^2),
+  grad_log_prob = function(t) -t, dim = 3L)
+geom_target$dim
+geom_target$grad_log_prob(c(1, 2, 3))
+```
+
+The `cmdstan`-backed bridge and the one-call fit are heavy (they compile and
+sample) and are reproduced by the gated script:
+
+```{r bridge-heavy, eval=FALSE}
+# Reproduced by inst/scripts/geometry_pilots_deep.R (GDPAR_RUN_GEOMETRY_PILOTS=1)
+fit    <- gdpar(gdpar_bf(y ~ a(x), sigma ~ a(z)), data = d,
+                family = gdpar_family("gaussian"), skip_id_check = TRUE)
+bridge <- gdpar_geom_bridge(fit)
+res    <- gdpar_geom_orchestrate(bridge$target, bridge$geom_target,
+                                 reference = bridge$reference)
+
+# Or, in one call, building the model through the shared .gdpar_K_build() seam:
+res2 <- gdpar_geom_fit(gdpar_bf(y ~ a(x), sigma ~ a(z)), data = d,
+                       family = gdpar_family("gaussian"), skip_id_check = TRUE)
+res2$status
+```
+
+# RG.7: applying the capability to the real count, and the certified limit {#rg7}
+
+With the capability in place, RG.7 revisited the **real** Tweedie count of 9.2.O
+(four NE-USA sub-regions, unconstrained dimension `d = 14`). The case turned out
+to be **much harder than the ladder anticipated**, and the honest verdict is
+worth stating plainly because it sharpens one of this block's own assumptions.
+
+**The canyon is genuinely non-Gaussian, and that is certified, not assumed.**
+The count posterior is a stiff canyon: the observed-information condition number
+at the mode is `9e7`--`4e8`. The sub-Riemannian level (the count's intended
+remedy) and a constant-mass Laplace preconditioner can be made to *accept* on a
+single chain, but acceptance plus zero divergences on **one** chain do not prove
+mixing. The decisive test is a **multi-chain** gate (R-hat / ESS across
+independent chains) -- a diagnostic added to the orchestrator after a careful
+external review, and now a permanent part of it. It caught a **single-chain
+false positive**: what looked "resolved" was not.
+
+The decisive experiment was a **whitened NUTS** -- Stan's adaptive sampler with a
+dense metric equal to the Laplace precision (the `-`Hessian at the climbed mode),
+every chain initialised at the mode, 1000 warmup + 4 x 1000 sampling. If the
+posterior were locally Gaussian, whitening would make it isotropic and NUTS would
+mix trivially. It does **not**: R-hat = 1.117, ESS-bulk = 22.5, 5% divergences.
+**Divergences in already-whitened coordinates can only mean the geometry is
+genuinely non-Gaussian** -- the canyon *curves*; a frozen Gaussian metric cannot
+track it, and a per-step Riemannian metric is infeasible here (minutes per exact
+Hessian). This **revises the rigidity assumption** used to motivate the
+sub-Riemannian level (Section [Level 5](#subriem)): rigidity does *not* imply
+Gaussianity once the canyon curves -- Bernstein--von Mises holds only in a
+vanishingly small neighbourhood of the mode. We keep the assumption where it was
+validated (RG.4, condition `~90`) and record, honestly, where the real count
+breaks it.
+
+**The honest endpoint is the Laplace / plug-in predictive -- competitor parity.**
+When a posterior is a certified non-sampleable non-Gaussian canyon, the
+first-class outcome (charter section 2.4) is a **certified, reproducible limit**
+plus the **Laplace / plug-in** predictive. This is not a consolation: it is
+*exactly* the regime of the competitors on this coordinate. `mgcv`/REML reports a
+coefficient-Gaussian + dispersion/power plug-in; `INLA` reports a Laplace
+approximation; both are `O(d/n)`-exact Laplace / plug-in predictives, not exact
+MCMC. `gdpar` matches that regime: the mode plus the exact-Hessian Gaussian
+posterior `N(mode, M^{-1})`, pushed through the model's own `constrain_variables`
+and `predict()` so the Tweedie density and change-of-variables Jacobian are
+scored identically to every competitor.
+
+Crucially, the Laplace approximation is **diagnosed, never trusted blindly**. The
+extractor reports its fidelity against the true posterior over the same draws:
+the importance-sampling ESS, the PSIS Pareto-`k` of the weights `p/q`, and the
+mean log-density drop `log p(mode) - log p(theta_s)` against its Gaussian
+expectation `d/2`. On the real count these say loudly that the Laplace Gaussian is
+a *wide, crude* proposal for the curved canyon (Pareto-`k` `0.77`--`1.05`, ESS
+`< 5%`, drop `>> d/2`) -- which is the **scientific finding**, a measurement of
+*how* non-Gaussian the canyon is, not a defect to hide.
+
+**The result (full table in `inst/benchmarks/results/block9_revalidation.md`).**
+gdpar's mode (plug-in) Tweedie ELPD matches mgcv's REML plug-in to **< 0.4 ELPD
+units in all four cells** -- the same predictive surface, reached by a different
+optimiser. gdpar's *full* Laplace average is `7`--`36` lower because it
+propagates the dispersion and power uncertainty that mgcv/REML plug in (a
+conservative, not a favourable, choice -- gdpar gets no credit for plugging in);
+the gap is within `~1`--`1.5` standard errors, so the two are statistically
+indistinguishable. 9.2.O closes at **80/80**. The geometry capability earned its
+keep here not by sampling the canyon but by **diagnosing** it (cond `~1e8`,
+genuine non-Gaussianity), **certifying** the limit with a falsifiable multi-chain
+experiment, and **delivering a competitor-parity predictive** where naive NUTS
+produced nothing usable.
+
+## The automated fallback (`gdpar_geom_laplace()`, `laplace_fallback`) {#laplace-fallback}
+
+Because this regime (a near-deterministic, genuinely non-Gaussian canyon) is now
+characterised, the Laplace machinery is promoted into `R/` as a first-class,
+exported capability, **`gdpar_geom_laplace()`**, and wired into the orchestrator
+behind an opt-in flag. Given any engine target, it climbs to the mode (reading
+the *same* target and gradient the sampler uses), forms the precision
+`M = -`Hessian, and returns the mode + precision Gaussian `N(mode, M^{-1})`,
+optional draws, and the fidelity diagnostics above distilled into a single scalar
+label. On a clean Gaussian the label is `"good"`:
+
+```{r laplace-good}
+A   <- matrix(c(2, 0.8, 0.8, 1), 2, 2)
+mu  <- c(1, -0.5)
+tgt <- gdpar_geom_target(
+  log_prob      = function(t) -0.5 * as.numeric(t(t - mu) %*% A %*% (t - mu)),
+  grad_log_prob = function(t) -as.numeric(A %*% (t - mu)),
+  hessian       = function(t) -A, dim = 2L)
+lap <- gdpar_geom_laplace(tgt, draws = 500L, seed = 1L)
+c(label = lap$fit_quality_label, max_mode_err = max(abs(lap$mode - mu)))
+```
+
+The orchestrator gains `laplace_fallback = FALSE` (the bit-identical opt-in
+default) and `laplace_draws`. When opted in and a run ends in a **certified
+limit**, it attaches the Laplace (`$laplace`) and relabels the status
+`"certified_limit_laplace"` -- the sampling limit *still stands* and a labelled,
+fidelity-diagnosed Laplace posterior is provided, never advertised as exact:
+
+```{r laplace-fallback-heavy, eval=FALSE}
+# Reproduced by inst/scripts/geometry_pilots_deep.R (GDPAR_RUN_GEOMETRY_PILOTS=1)
+res <- gdpar_geom_orchestrate(bridge$target, bridge$geom_target,
+                              reference = bridge$reference,
+                              laplace_fallback = TRUE, laplace_draws = 2000L)
+res$status                 # "certified_limit_laplace"
+res$laplace$fit_quality_label   # on the real 9.2.O canyon: "very_poor"
+```
+
+On the out-of-scope path (multimodality, a flat direction, a boundary) the
+Gaussian premise is violated, so the fallback is attached *only* when the
+curvature at the mode is genuinely positive-definite -- otherwise the certificate
+is left untouched (no overreach). The full RG.7 result table is in
+`inst/benchmarks/scripts/rg7_laplace_elpd.R` and
+`inst/benchmarks/results/block9_revalidation.md`.
+
+# Honesty: demonstrated vs. conjectured, and no overreach
+
+Following ORPHEUS §16.3: what is **demonstrated** here is **correctness** -- every
+sampler level is Metropolis-exact with respect to the true posterior, so the
+geometry only ever changes *efficiency*, never the validity of the draws, and a
+mis-diagnosis wastes a bounded amount of budget, never corrupts the answer. What
+is **conjectured / measured** is *efficiency*: which level wins, the speed-ups, the
+prescriptions. `gdpar` **integrates and orchestrates** established methods; it does
+not claim to invent them. The anchors are Girolami--Calderhead 2011 (RMHMC,
+generalized implicit leapfrog), Betancourt (SoftAbs, E-BFMI, sampling
+pathologies), Neal (the funnel), Lu et al. 2017 (relativistic Monte Carlo),
+Livingstone--Faulkner--Roberts 2019 (kinetic energy under heavy tails),
+Montgomery 2002 (sub-Riemannian geometry, Chow--Rashevsky),
+Shahbaba--Lan--Johnson--Neal 2014 (split HMC), Roberts--Rosenthal 2007 (diminishing
+adaptation / containment), Li et al. 2018 (Hyperband / successive halving),
+Xu et al. 2008 (SATzilla, runtime-predicted algorithm selection), and, for the
+statistical-manifold frame, Rao--Amari information geometry,
+Pennec--Sommer--Fletcher and Bhattacharya--Patrangenaru (Riemannian statistics)
+as cited in the user's manuscript.
+
+# Reproducing the heavy runs {#appendix}
+
+Every `eval = FALSE` chunk above is reproduced end to end by the gated script
+
+```
+inst/scripts/geometry_pilots_deep.R
+```
+
+Run it with the gate set (it compiles `cmdstan` models and samples, so it takes
+several minutes and is never run during a normal package check):
+
+```r
+Sys.setenv(GDPAR_RUN_GEOMETRY_PILOTS = "1")
+source(system.file("scripts", "geometry_pilots_deep.R", package = "gdpar"))
+```
+
+It covers: the diagnostic on a compiled diana, each ladder level on a real
+`cmdstan` model, the full orchestrator (resolution and certified limit), and the
+bridge plus the one-call `gdpar_geom_fit`. This keeps the package build light
+while preserving full, falsifiable reproducibility of the geometry capability.

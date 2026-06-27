@@ -1,0 +1,299 @@
+---
+title: "**Theoretical Addendum -- Block 9:**"
+subtitle: "Cognitive Motivation: From Driver Prediction to Reference-Anchored Individuation"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{Cognitive Motivation: From Driver Prediction to Reference-Anchored Individuation}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+---
+
+# **1. Purpose**
+
+The overview vignette opened with a cognitive observation: an experienced driver predicting other drivers' behavior at high speed by combining a **population reference** (the "average driver" of the country) with **rapid individual-deviation inference** (cues from the specific other driver) to produce a conditional prediction. The mathematical formalization in Blocks 1-8 of this addendum has reorganized that observation into a canonical predictive framework.
+
+A reasonable reader can ask: **is the cognitive analogy a decorative metaphor, or does it have substantive grounding?** This block answers by connecting the framework's structure to a specific research program in cognitive science and machine learning ---the **"machines that learn and think like people" program** (Lake, Ullman, Tenenbaum, Gershman 2017)--- and by showing that the framework's key structural features have well-documented analogs in the cognitive literature.
+
+The block does **not** claim that AMM models human cognition. The claim is the strictly weaker but defensible one that **the framework's distinguishing feature ---reference-anchored individual deviation, $\theta_i = \theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}})$, with $\Delta$ depending structurally on $\theta_{\text{ref}}$--- has formal cognates in the cognitive literature on hierarchical Bayesian inference, core knowledge, and probabilistic program induction**, and that those cognates provide **structural antecedents** and a **motivational framework** for the framework's design choices.
+
+**On the epistemic status of the analogy.** Throughout this block, references to cognitive-science work are made as **antecedents** ---i.e., established programs whose structural commitments anticipate features that AMM articulates in a specific statistical context--- and as a **motivational framework** ---i.e., the conceptual setting from which the framework's design choices acquire intelligibility. The cited literature does **not "confirm" the AMM scheme**: it does not establish that AMM is correct, that AMM is cognitively realistic, or that AMM is the unique articulation of the structural pattern it shares with the cited works. The relationship is one of structural antecedence and conceptual motivation, not of empirical or theoretical validation. This stylistic discipline is maintained throughout the block.
+
+The block proceeds:
+
+- **§2** restates the driver analogy in formal terms, reading off the structural features that the AMM framework formalizes.
+- **§3-§7** review five strands of cognitive-science work that have direct structural cognates in the AMM framework: hierarchical Bayesian cognition (Tenenbaum et al. 2011), core knowledge (Spelke and Kinzler 2007), the "machines that think like people" program (Lake et al. 2017), Bayesian program learning (Lake, Salakhutdinov, Tenenbaum 2015), and resource-rational analysis (Lieder and Griffiths 2020).
+- **§8** connects each strand to a specific feature of the AMM canonical form, with explicit acknowledgement of the structural correspondences and of their limits.
+- **§9** delimits what the cognitive analogy **does** and **does not** justify, in the spirit of Block 8's no-overreach discipline.
+- **§10** lists open questions on the cognitive grounding of the framework.
+
+---
+
+# **2. The Cognitive Starting Point: Driver Prediction Formalized**
+
+The overview vignette describes the cognitive process of an experienced driver predicting other drivers in three stages:
+
+(i) **Population reference**: an internal model of "the average driver" of the country, with characteristic reaction times, aggressiveness, modal patterns of acceleration, braking, and lane-changing.
+
+(ii) **Rapid individual-deviation inference**: within one or two seconds, observation of driving style, vehicle type, spacing, micro-movements, and inference of how the specific driver departs from the average ---more aggressive, more cautious, more impatient, vehicle-allowed-bolder, etc.
+
+(iii) **Conditional prediction**: combination of (i) and (ii) to predict the specific driver's behavior in the immediate situation, then maneuver decision based on that prediction.
+
+The structural features of this process, when formalized:
+
+| Cognitive feature | AMM formalization |
+|:------------------|:------------------|
+| Population reference (the average driver) | $\theta_{\text{ref}} \in \Theta$ |
+| Individual-deviation inference from cues | $\Delta(x_i, \theta_{\text{ref}})$, function of observable signals $x_i$ and reference $\theta_{\text{ref}}$ |
+| Conditional prediction from individualized parameter | $\hat{y}_i = f(x_i; \theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}}))$ |
+| Reference-dependent calibration of deviation | Structural dependence of $\Delta$ on $\theta_{\text{ref}}$, the framework's distinguishing feature |
+| Anchoring to the population when individual signals are weak | Property 1 (anchoring) of Block 1 §6.4 |
+| Transferability across populations (drivers in another country) | Property 3 (transferability) of Block 1 §11 |
+
+The formalization is faithful to the cognitive observation: each structural feature of driver prediction has a precise AMM counterpart, and the framework's distinguishing feature ($\Delta$ depending on $\theta_{\text{ref}}$ as a non-trivial second argument) corresponds to the cognitive observation that **the calibration of the individual deviation depends on the population reference itself** ---in another country with a different "average driver", the same individual cues would be interpreted differently.
+
+The next sections review the cognitive-science literature that has documented this kind of structure formally and computationally.
+
+---
+
+# **3. Hierarchical Bayesian Cognition (Tenenbaum, Kemp, Griffiths, Goodman 2011)**
+
+A landmark review by Tenenbaum, Kemp, Griffiths, and Goodman (2011) in *Science* opens with the central question:
+
+> "In coming to understand the world ---in learning concepts, acquiring language, and grasping causal relations--- our minds make inferences that appear to go far beyond the data available."
+
+The authors review the computational program known as **probabilistic models of cognition**: the proposal that human inference under sparse data is captured by **probabilistic inference over hierarchies of flexibly structured representations**. The hierarchy has population-level priors at the top, individual-level instantiations at intermediate levels, and observations at the bottom; learning proceeds by joint inference at all levels.
+
+**Connection to AMM.** The AMM canonical form is a specific instance of this hierarchical pattern:
+
+- The **population level** is $\theta_{\text{ref}}$, the framework's reference parameter.
+- The **individual level** is $\theta_i$, related to $\theta_{\text{ref}}$ via the deviation function.
+- The **observation level** is $Y_i \mid \theta_i$, the response distribution.
+
+The framework's three Paths (Block 1 §3-§5) correspond to three operationalizations of hierarchical Bayesian inference: explicit MCMC (Path 1), penalized-spline frequentist analog (Path 2), and amortized neural inference (Path 3). The AMM identifiability theorems (Block 1 Theorem 1A) and asymptotic results (Blocks 4-6) inherit from the broader theory of hierarchical Bayesian inference reviewed by Tenenbaum et al. (2011).
+
+**What is novel in AMM relative to the broader hierarchical-Bayesian program.** The framework's distinguishing feature ---structural dependence of $\Delta$ on $\theta_{\text{ref}}$ as a second argument--- is **not generic** to hierarchical Bayesian models. Standard hierarchical models center individual parameters on the population mean but do not let the **shape** of individual deviations depend on the population reference. The AMM canonical form (specifically Level 2 with non-trivial $b(x) \odot \theta_{\text{ref}}$ or $W(\theta_{\text{ref}}) x$) is a structured extension of the hierarchical Bayesian template that introduces this dependence explicitly.
+
+---
+
+# **4. Core Knowledge as Structured Prior (Spelke and Kinzler 2007)**
+
+A separate strand of cognitive science, descending from the work of Elizabeth Spelke, has documented that human cognition is built on a small set of **core systems** that operate from infancy and provide structured prior knowledge for further learning. Spelke and Kinzler (2007) summarize:
+
+> "Human cognition is founded, in part, on four systems for representing objects, actions, number, and space. It may be based, as well, on a fifth system for representing social partners. Each system has deep roots in human phylogeny and ontogeny, and it guides and shapes the mental lives of adults."
+
+The **core systems** are domain-specific structured representations that constrain inference: rather than learning from zero, humans bring innate priors that scaffold further structured learning. Carey (2009, *The Origin of Concepts*, Oxford University Press) develops this into a theory of conceptual change in which core knowledge provides the substrate from which more abstract concepts are constructed.
+
+**Connection to AMM.** The framework's centering and anchoring conditions (C1)-(C4) of Block 1 are the AMM analog of "structured prior knowledge that scaffolds further learning":
+
+- (C1)-(C4) impose that the **population reference $\theta_{\text{ref}}$ functions as the anchor** of all individual deviations.
+- The "average driver" of the cognitive analogy is the analog of a **core system**: a structured representation with which the predictor enters every concrete prediction.
+- Individual deviations are then **adjustments to the core**, not free-form individualizations.
+
+Without this structured prior, the framework would degenerate to fitting individual parameters independently per individual ---a specification that, as Block 1 §3.2 (Level 0) shows, yields no individuation and no transfer. **The framework's structural commitment to a population reference is the AMM analog of the cognitive commitment to core systems.**
+
+The Sohn-Rethel-style **"real abstraction"** discussion of Block 2 §2 (the population reference as a gnoseological aggregate of the system's structure) finds its cognitive cognate in this literature: core systems are not concrete entities (no neuron or brain region "is" the core system for objects) but functional abstractions of the cognitive system's structure that are objectively present in its behavior. The AMM framework adopts the same stance: $\theta_{\text{ref}}$ is not the parameter of any concrete individual but the gnoseological aggregate of the population's structure.
+
+---
+
+# **5. The "Machines That Learn and Think Like People" Program (Lake, Ullman, Tenenbaum, Gershman 2017)**
+
+The 2017 *Behavioral and Brain Sciences* target article by Lake, Ullman, Tenenbaum, and Gershman ---one of the most-cited papers in contemporary cognitive science--- consolidates the position that **deep neural networks alone are not sufficient for human-like learning and thinking**, and identifies three structural ingredients that are needed in addition. From the abstract:
+
+> "We argue that these machines should (a) build causal models of the world that support explanation and understanding, rather than merely solving pattern recognition problems; (b) ground learning in intuitive theories of physics and psychology, to support and enrich the knowledge that is learned; and (c) harness compositionality and learning-to-learn to rapidly acquire and generalize knowledge to new tasks and situations."
+
+The three ingredients map onto specific structural features of human cognition that pure pattern-recognition systems lack:
+
+(a) **Causal modelling**: humans represent the world in terms of causes, effects, and counterfactuals, not merely in terms of correlations.
+
+(b) **Intuitive theories**: humans reason about physics, psychology, and social interactions using structured prior models (intuitive physics; theory of mind), not from scratch.
+
+(c) **Compositionality and learning-to-learn**: humans build complex concepts from simpler ones and transfer learned skills to new tasks.
+
+**Connection to AMM.**
+
+- **(a) Causal modelling.** The AMM framework distinguishes (per Block 8) between predictive and counterfactual interpretation of $\Delta_i$. Block 8 Theorem 8B shows the explicit bridge under which AMM identifies CATE and supports counterfactual interpretation. The framework's positioning aligns with the Lake et al. (2017) program: predictive structure is the default, and counterfactual interpretation is a deliberate addition under explicit identification assumptions.
+
+- **(b) Intuitive theories / structured prior.** The framework's centering and anchoring conditions, plus the specific functional structure of $\Delta(x_i, \theta_{\text{ref}})$, correspond to "structured prior models" in the Lake et al. (2017) sense. The framework does not learn from scratch; it imposes specific structural constraints (LIN, FIC, centering) that constitute a structured prior on the relationship between individual covariates and individual deviations.
+
+- **(c) Compositionality and learning-to-learn.** The framework's three Paths and the AMM hierarchy (Levels 0, 1, 2, 2.5, 3, $K$, $\infty$ of Block 1 §3) correspond to a **compositional decomposition of the deviation function** into additive, multiplicative, and modulated components. Each component captures a distinct mechanism, and the components combine linearly under the centering constraints. This is the AMM analog of the compositional structure that Lake et al. (2017) identify as essential for human-like generalization.
+
+**Caveat: AMM is not a theory of human cognition.** The framework is a **statistical methodology** with structural cognates in cognitive science, not a cognitive model. The Lake et al. (2017) program identifies necessary ingredients for human-like systems; AMM realizes some of these ingredients in a specific statistical context. The framework neither claims to be cognitively realistic nor to advance cognitive science in its own right ---it claims that its structural choices are **defensible as articulations of an established cognitive-science program** rather than as ad-hoc statistical conveniences.
+
+---
+
+# **6. Probabilistic Program Induction and One-Shot Generalization (Lake, Salakhutdinov, Tenenbaum 2015)**
+
+A specific instantiation of the Lake et al. (2017) program is the **Bayesian Program Learning (BPL)** framework introduced by Lake, Salakhutdinov, and Tenenbaum (2015) in *Science*. The paper presents a computational model that achieves human-level one-shot concept learning for handwritten characters by representing each concept as a **simple program** that explains observed examples under a Bayesian criterion. The model:
+
+- Operates over hierarchical, compositional representations.
+- Generalizes from one or few examples to new tasks.
+- Uses a structured prior over programs (parts and relations).
+
+**Connection to AMM.** BPL and the AMM framework share the structural pattern of **hierarchical inference over a structured representation with explicit decomposition of an instance into a population-prior plus an individual deviation**. In BPL:
+
+- The population-prior is the distribution over programs.
+- The individual deviation is the specific program that explains the observed instance.
+- One-shot generalization is achieved because the structured prior constrains learning to a manageable space.
+
+In AMM:
+
+- The population-prior is $\theta_{\text{ref}}$ together with the function classes $\mathcal{F}_a, \mathcal{F}_b, \mathcal{F}_W$.
+- The individual deviation is $\Delta(x_i, \theta_{\text{ref}})$.
+- Few-shot individuation is achieved because the structured prior (the AMM canonical form with centering and anchoring) constrains individual fits to a manageable space.
+
+**The structural parallel is not coincidental.** Both BPL and AMM operationalize the hierarchical Bayesian program (Tenenbaum et al. 2011) with specific structural commitments (compositional programs in BPL; the AMM canonical form in this framework). The framework's design draws on the same family of structural ideas, applied to a different statistical context (parametric/non-parametric individual deviation rather than character recognition).
+
+**What AMM does not inherit from BPL.** BPL's ability to **synthesize new examples** from the learned concept ---generating new instances that are creatively similar to the training data--- does not transfer directly to AMM. The AMM framework is a predictive framework over individual parameters, not a generative model of new individuals from the population. Synthesis-style generalization is outside the framework's scope.
+
+---
+
+# **7. Resource-Rationality (Lieder and Griffiths 2020)**
+
+The most recent strand of the program ---**resource-rational analysis** (Lieder and Griffiths 2020)--- addresses a key tension: human cognition operates under **bounded computational resources**, and pure rationality is not the right normative standard. From the paper:
+
+> "Resource-rational analysis is an extension of rational analysis that takes people's limited cognitive resources seriously, striving to uncover cognitive mechanisms and representations by taking into account the cognitive architecture that people have available to pursue their goals."
+
+The resource-rational view: cognition is the **optimal use of limited computational resources** subject to environmental and architectural constraints, not an unbounded ideal-rational process.
+
+**Connection to AMM.** The framework's three Paths reflect a resource-rational decomposition:
+
+- **Path 1 (hierarchical Bayesian via Stan)**: highest fidelity to the ideal hierarchical Bayesian program of Tenenbaum et al. (2011), but most computationally expensive (MCMC sampling).
+- **Path 2 (varying-coefficient via splines)**: a frequentist approximation that is computationally cheaper and supports faster fits at the cost of the Bayesian uncertainty propagation.
+- **Path 3 (hypernetwork via torch)**: amortized inference via neural networks, trading explicit identifiability theorems for scalability and the ability to capture arbitrarily nonlinear deviation functions.
+
+The framework provides three Paths because **no single Path is resource-rational in all contexts**: the user chooses based on computational budget, sample size, identifiability requirements, and substantive structure. Block 7 (EB vs FB) and Block 1 §6.8 (empirical discrimination protocol for Path 1 vs Path 3) extend this resource-rational logic to specific operational decisions.
+
+**The framework as a resource-rational architecture.** Read through the Lieder-Griffiths lens, the AMM framework is the **architectural decomposition** of hierarchical Bayesian individuation into operationalizations matched to different resource constraints. The cognitive analogy is faithful at this architectural level: the experienced driver does not solve a full Bayesian inference problem in one or two seconds but uses heuristic approximations (Path 3-style amortized inference, in this view) anchored to a structured prior (the population reference). The framework gives the user the same architectural choice between high-fidelity-expensive and approximate-fast inference, depending on the use case.
+
+---
+
+# **8. Mapping Cognitive-Science Strands to AMM Features**
+
+The five cognitive-science strands of §3-§7 each correspond to a specific feature of the AMM framework. The map:
+
+| Cognitive-science feature | AMM feature | Reference |
+|:-------------------------|:------------|:----------|
+| Hierarchical Bayesian inference over structured representations | Three-level AMM (population, individual, observation) | Tenenbaum et al. 2011 |
+| Core knowledge as structured prior | Centering and anchoring (C1)-(C4); $\theta_{\text{ref}}$ as gnoseological aggregate | Spelke and Kinzler 2007 |
+| Causal models supporting explanation | Block 8 bridge to CATE under (REPAR)+(IGN)+(OVL)+(CONS) | Lake et al. 2017 (a) |
+| Intuitive theories grounding learning | AMM canonical form as structured statistical prior | Lake et al. 2017 (b) |
+| Compositionality and learning-to-learn | AMM hierarchy of Levels (0, 1, 2, 2.5, 3, $K$, $\infty$) | Lake et al. 2017 (c) |
+| Probabilistic program induction with structured prior | AMM canonical form + function classes $\mathcal{F}_a, \mathcal{F}_b, \mathcal{F}_W$ | Lake et al. 2015 |
+| Few-shot individuation under structured prior | Anchoring property (Block 1 Property 1) | Lake et al. 2015 |
+| Resource-rational decomposition | Three Paths (Bayesian, frequentist, amortized) | Lieder and Griffiths 2020 |
+
+The map is **not exhaustive**: cognitive science has many strands (predictive coding, free-energy principle, dual-process theories) that the AMM framework does not directly draw on. The map identifies the **strands that the framework's structural choices actively articulate**, with the corresponding citations as evidence that the choices have antecedents in established cognitive-science literature.
+
+---
+
+# **9. What the Cognitive Analogy Does and Does Not Justify**
+
+Following the no-overreach discipline of Block 8, we delimit explicitly what the cognitive analogy of this block establishes and what it does not.
+
+**The cognitive analogy does establish:**
+
+(i) **Structural cognates.** The AMM framework's distinguishing features ---population reference + reference-anchored individual deviation, with $\Delta$ structurally depending on $\theta_{\text{ref}}$--- have formal cognates in established cognitive-science programs (hierarchical Bayesian inference, core knowledge, BPL, resource-rational analysis).
+
+(ii) **A research-program framing.** The framework's design choices are defensible as articulations of an established cognitive-science research program, not as ad-hoc statistical conveniences.
+
+(iii) **A motivational arc.** The cognitive observation that opens the overview vignette (the experienced driver) is not a decorative metaphor; it points to a structural pattern that has been studied formally in cognitive science and that the AMM framework operationalizes in a specific statistical context.
+
+**The cognitive analogy does NOT establish:**
+
+(i) **AMM as a theory of human cognition.** The framework is a statistical methodology with structural cognates in cognitive science. It does not predict human behavior, does not aim to fit cognitive data, and does not make falsifiable claims about cognitive mechanisms. Cognitive science is the source of structural inspiration; AMM is the statistical articulation.
+
+(ii) **Cognitive plausibility as a validation criterion.** The framework's correctness is established by Blocks 1-8 (identifiability, asymptotic theory, validity diagnostics, special cases, CATE positioning), not by alignment with cognitive data. Cognitive plausibility is a motivational ground, not a validation standard.
+
+(iii) **Universal applicability.** Cognitive observations are domain-specific (driver prediction; concept learning; intuitive physics). The AMM framework applies to any domain with the AMM structure, regardless of cognitive plausibility. A domain in which "no average individual" exists or in which population stratification is severe (Block 2 violations of HOM, REG, CLOS) is outside the framework's validity, and cognitive analogies do not rescue it.
+
+(iv) **A claim that cognitive science endorses or confirms AMM.** The cited works are by no means uniformly committed to the specific structural choices the AMM framework makes. The framework draws on cognitive-science programs as **structural antecedents and motivational framework**, not as endorsement, validation, or confirmation. No claim is made that the cognitive-science literature has tested, validated, or vindicated the AMM scheme; the claim is the strictly weaker one that the AMM scheme has **antecedents** in the cited programs and acquires **conceptual motivation** from their broader research framing.
+
+---
+
+# **10. Open Questions on Cognitive Grounding**
+
+**(O1-Cog) Empirical falsification of the analogy.** The cognitive analogy is currently **structural**: it identifies cognates, not empirically validated correspondences. Whether human predictors actually use AMM-style reference-anchored individuation in real-time prediction tasks (driver prediction; sports prediction; medical diagnosis under uncertainty) is an empirical question that cognitive science could address. The framework would benefit from such empirical work but does not depend on it.
+
+**(O2-Cog) Compositionality of cognitive primitives.** The AMM hierarchy (Levels 0, 1, 2, 2.5, 3, $K$, $\infty$) is a structural decomposition of deviation functions. The cognitive-science literature on **compositional cognition** (Lake et al. 2015, 2017) identifies analogous decompositions of concepts into parts and relations. Whether the AMM hierarchy maps cleanly to a compositional cognitive vocabulary ---e.g., do the AMM components $a, b, W$ correspond to distinct cognitive operations?--- is open.
+
+**(O3-Cog) Resource-rational specifics.** Lieder and Griffiths (2020) argue for resource-rational analysis as the right normative standard. The AMM framework's three Paths are an architectural decomposition compatible with this view, but **a formal resource-rational analysis of when each Path is preferred** ---i.e., a formal mapping from problem features to optimal Path under resource constraints--- is not closed.
+
+**(O4-Cog) Connection to specific cognitive models.** The framework has structural cognates with several cognitive models (BPL, intuitive physics, theory of mind). **A precise mapping** that identifies which cognitive models are direct generalizations or specializations of AMM, and which use distinct mathematical structures, is open. Such a mapping would clarify the framework's place in the cognitive-science literature.
+
+These open questions are not central to the framework's statistical correctness. They are open avenues at the interface between AMM and cognitive science.
+
+---
+
+# **11. Connections to the Rest of the Addendum**
+
+This block closes the addendum. Its connections to previous blocks:
+
+- **Overview vignette (driver analogy)**: Block 9 formalizes the cognitive observation that opens the overview into a research-program framing tied to specific cognitive-science literature.
+
+- **Block 1 (AMM identifiability)**: the framework's distinguishing feature ($\Delta$ depending on $\theta_{\text{ref}}$) corresponds to the cognitive analogy's reference-dependent calibration of individual deviations. The AMM canonical form and centering / anchoring conditions are the structural articulation of this dependence.
+
+- **Block 2 (gnoseological validity)**: the population reference $\theta_{\text{ref}}$ as a gnoseological real abstraction matches the cognitive-science treatment of core systems and structured priors as functional abstractions of cognitive structure, not concrete entities. Both stances reject ontological commitment to the average individual while affirming its gnoseological role.
+
+- **Block 8 (CATE/ITE positioning)**: the framework's functional-predictive default (with explicit causal-bridge invocation when needed) aligns with the Lake et al. (2017) program's ingredient (a) ---causal modelling as a deliberate structural addition, not a default.
+
+- **Block 1 §6.8 empirical discrimination protocol; Blocks 4-6 asymptotics**: the architectural decomposition into three Paths reflects the resource-rational analysis of Lieder and Griffiths (2020), with each Path matched to a different combination of computational budget, identifiability requirements, and structural assumptions.
+
+The cognitive motivation is therefore **not external decoration** but a **set of structural antecedents and a motivational framework** within which the framework's choices acquire intelligibility: the population reference, the reference-dependent deviation, the centering and anchoring, the architectural decomposition into Paths, and the functional-predictive default with optional causal interpretation each have a counterpart in the cognitive-science programs articulated by the cited literature. **The cognitive analogy does not validate or confirm these choices** ---validation comes from the mathematical content of Blocks 1-8--- but it does provide a coherent research-program setting in which the choices are defensible articulations rather than isolated statistical conveniences.
+
+---
+
+# **12. Summary**
+
+This block has established:
+
+1. **The driver analogy is not decorative**: each structural feature of the cognitive observation that opens the overview vignette has a precise AMM counterpart, and the framework's distinguishing feature (reference-dependent calibration of individual deviations) corresponds to the cognitive feature it formalizes.
+
+2. **The cognitive analogy has substantive grounding** in five strands of cognitive-science literature: hierarchical Bayesian cognition (Tenenbaum et al. 2011), core knowledge (Spelke and Kinzler 2007), the "machines that think like people" program (Lake et al. 2017), Bayesian program learning (Lake et al. 2015), and resource-rational analysis (Lieder and Griffiths 2020). Each strand has a specific structural cognate in the AMM framework, mapped explicitly in §8.
+
+3. **The framework's design choices are defensible as articulations of an established research program**, not as ad-hoc statistical conveniences. The cognitive analogy is the **motivational ground**, not the validation criterion (which is established by Blocks 1-8).
+
+4. **No-overreach discipline** is maintained: the cognitive analogy establishes structural cognates, a research-program framing, and a motivational arc; it does not establish AMM as a theory of human cognition, does not validate the framework on cognitive grounds, and does not claim universal applicability.
+
+5. **Four open questions** at the interface between AMM and cognitive science are recognized: empirical falsification of the analogy, compositionality of cognitive primitives, resource-rational specifics, and precise mapping to specific cognitive models.
+
+The framework's cognitive motivation is therefore presented at the same level of disciplinary humility as its asymptotic theory (Blocks 4-6), causal positioning (Block 8), and EB-vs-FB recommendation (Block 7): **what the analogy gives, and what it does not give, is made explicit**, with citations to the cited literature serving as evidence of the structural correspondences and not as endorsement.
+
+This closes the theoretical addendum to the overview vignette. The reader who has worked through Blocks 1-9 has a complete view of the framework's mathematical structure (Block 1), gnoseological validity conditions (Block 2), subsumption of standard models (Block 3), asymptotic theory (Blocks 4-6), EB-vs-FB recommendation (Block 7), causal positioning (Block 8), and cognitive motivation (Block 9), with explicit hypotheses, scope statements, and open questions throughout.
+
+---
+
+# **References Cited in This Block**
+
+Carey, S. (2009). *The Origin of Concepts*. Oxford University Press.
+
+Lake, B. M., Salakhutdinov, R., and Tenenbaum, J. B. (2015). Human-level concept learning through probabilistic program induction. *Science*, 350(6266), 1332--1338. <https://doi.org/10.1126/science.aab3050>
+
+Lake, B. M., Ullman, T. D., Tenenbaum, J. B., and Gershman, S. J. (2017). Building machines that learn and think like people. *Behavioral and Brain Sciences*, 40, e253. <https://doi.org/10.1017/S0140525X16001837>
+
+Lieder, F., and Griffiths, T. L. (2020). Resource-rational analysis: Understanding human cognition as the optimal use of limited computational resources. *Behavioral and Brain Sciences*, 43, e1. <https://doi.org/10.1017/S0140525X1900061X>
+
+Spelke, E. S., and Kinzler, K. D. (2007). Core knowledge. *Developmental Science*, 10(1), 89--96. <https://doi.org/10.1111/j.1467-7687.2007.00569.x>
+
+Tenenbaum, J. B., Kemp, C., Griffiths, T. L., and Goodman, N. D. (2011). How to grow a mind: Statistics, structure, and abstraction. *Science*, 331(6022), 1279--1285. <https://doi.org/10.1126/science.1192788>

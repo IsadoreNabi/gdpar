@@ -1,0 +1,464 @@
+---
+title: "**Theoretical Addendum -- Block 4:**"
+subtitle: "Asymptotic Theory for Path 1 (Hierarchical Bayesian)"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{Asymptotic Theory for Path 1 (Hierarchical Bayesian)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+---
+
+# **1. Purpose**
+
+Block 1 settled identifiability of the AMM canonical form at finite samples (Theorem 1A) and under a Bayesian prior (Theorem 1E). Block 2 stated consistency of the empirical reference estimator under (HOM)+(REG)+(IID)+(REG-EST) (Lemma 2B), with (REG-EST) asserting the average individual error vanishes in probability and the formal asymptotic content of (REG-EST) deferred to the present block.
+
+This block develops the asymptotic theory of **Path 1 (hierarchical Bayesian estimation via Stan)** for the AMM canonical form, organized in three layers parallel to the architecture of Blocks 1-3:
+
+- **(L1) Posterior consistency:** As $n \to \infty$, the posterior over $(\theta_{\text{ref}}, a, b, W)$ contracts to the true parameter.
+- **(L2) Posterior contraction rate:** The speed at which the posterior contracts to the truth, expressed as $\varepsilon_n \to 0$ such that $\Pi_n(\{d > M\varepsilon_n\}) \to 0$.
+- **(L3) Bernstein-von Mises (posterior CLT):** The posterior is asymptotically Gaussian around the maximum-likelihood estimator, with variance equal to the inverse Fisher information.
+
+The reference framework throughout is Ghosal and van der Vaart (2017), *Fundamentals of Nonparametric Bayesian Inference*; specific theorems are adapted to the AMM canonical form rather than re-derived from first principles. We state **what is established**, **what specialization to AMM costs in additional hypotheses**, and **what remains open** ---particularly for non-parametric components $(a, b, W)$, where the asymptotic theory is partial.
+
+The treatment specializes (REG-EST) of Block 2 to Path 1: under the hypotheses of Theorem 4A or 4B of this block, (REG-EST) holds in the form required by Lemma 2B of Block 2.
+
+---
+
+# **2. Setting and Notation**
+
+## **2.1. The Hierarchical Bayesian Path 1 Model**
+
+The Path 1 implementation of the AMM canonical form posits:
+
+- **Population reference**: $\theta_{\text{ref}} \sim \pi_\Theta$, a prior on $\Theta \subseteq \mathbb{R}^p$.
+- **AMM components**: $a \in \mathcal{F}_a$, $b \in \mathcal{F}_b$, $W \in \mathcal{F}_W$, each with its own prior $\pi_a, \pi_b, \pi_W$.
+- **Individual parameters**: $\theta_i = \theta_{\text{ref}} + a(x_i) + b(x_i) \odot \theta_{\text{ref}} + W(\theta_{\text{ref}}) x_i$.
+- **Response model**: $y_i \mid \theta_i \sim \mathcal{D}(\theta_i)$.
+- **Joint prior on the parameter vector**: $\pi := \pi_\Theta \otimes \pi_a \otimes \pi_b \otimes \pi_W$.
+- **Posterior**: $\Pi_n(\,\cdot\, \mid Y_{1:n}, X_{1:n}) \propto \pi(\cdot) \prod_{i=1}^n p(y_i \mid \theta_i(x_i, \theta_{\text{ref}}, a, b, W))$.
+
+We assume throughout (unless otherwise noted) that:
+
+- The standing assumptions (C1)-(C6), (LIN) of Block 1 hold for the AMM specification.
+- (D-ID) of Block 1 holds for the response distribution.
+
+### **2.1.1. Two design regimes: random and conditional**
+
+The asymptotic theory below is formulated under one of two design regimes, made explicit because the conclusions and the technical conditions differ.
+
+**(R-RANDOM) Random design.** The covariates $X_1, \ldots, X_n$ are i.i.d. samples from $\mu$, jointly independent across $i$ from $Y_i \mid X_i$. The full data are $\{(X_i, Y_i)\}_{i=1}^n$ from the joint distribution
+$$P_\eta(dx, dy) \;=\; \mu(dx) \cdot \mathcal{D}(\theta_*(x, \theta_{\text{ref}}))(dy).$$
+Asymptotic statements are made in $P_{\eta_*}$-probability over the joint distribution of $\{(X_i, Y_i)\}_{i=1}^n$. This is the **default formulation** of this block, matching the convention of Ghosal and van der Vaart (2017) for Bayesian nonparametrics.
+
+**(R-COND) Conditional-on-design (fixed-design) regime.** The covariates $X_1, \ldots, X_n$ are treated as fixed (or, equivalently, the asymptotic statements are made conditional on the observed design $X_{1:n}$). The conditional likelihood $\prod_{i=1}^n \mathcal{D}(\theta_*(X_i, \theta_{\text{ref}}))(Y_i)$ defines the posterior. Asymptotic statements are made in $P_{\eta_* \mid X_{1:n}}$-probability for $\mu^\infty$-almost every realization of $\{X_i\}$.
+
+The two regimes are **not equivalent in finite samples**; they typically converge to the same conclusions under (R-RANDOM) plus a Glivenko-Cantelli-style condition on $\mu$, formalized below.
+
+> **(R-EQUIV) Random-to-conditional equivalence.** Under (R-RANDOM) with $\mu$ admitting a strictly positive density on $\mathcal{X}$ and the function classes $\mathcal{F}_a, \mathcal{F}_b, \mathcal{F}_W$ being uniformly Glivenko-Cantelli over $\mu$, the asymptotic conclusions of Theorems 4A, 4B, 4C below hold identically in (R-RANDOM) and in (R-COND) for $\mu^\infty$-a.e. design.
+
+(R-EQUIV) is satisfied for the standard finite-dim parametric classes (Levels 0, 1, parametric Level 2) automatically; for non-parametric classes it requires uniform-class conditions standard in empirical process theory (van der Vaart and Wellner 1996, §2.4).
+
+We state the theorems below under (R-RANDOM) by default; an explicit "(R-COND) variant" is noted when the conditional-on-design formulation requires distinct hypotheses or yields distinct conclusions.
+
+### **2.1.2. Generative assumption on the data**
+
+Under (R-RANDOM): the data $\{(X_i, Y_i)\}_{i=1}^n$ are generated under the model with true parameter $\eta_* := (\theta_*, a_*, b_*, W_*)$ and i.i.d. covariates $X_i \sim \mu$.
+
+Under (R-COND): the covariates $X_{1:n}$ are an arbitrary fixed sequence; the responses $Y_i$ are conditionally independent given $X_{1:n}$ under $\mathcal{D}(\theta_*(X_i, \theta_{\text{ref}}))$.
+
+## **2.2. Distance on the Parameter Space**
+
+Asymptotic results are stated in terms of a distance on the parameter space $\Theta \times \mathcal{F}_a \times \mathcal{F}_b \times \mathcal{F}_W$. Two distances are used in this block, **for distinct purposes**, with their relationship to each other made explicit rather than asserted as equivalence.
+
+- **Hellinger distance on the data-generating distribution**: $d_H(\eta, \eta') = \bigl(\int (\sqrt{p_\eta} - \sqrt{p_{\eta'}})^2 \, d\nu \bigr)^{1/2}$, where $p_\eta$ is the density of $(X, Y)$ under parameter $\eta$ and $\nu$ is a dominating measure. Used for posterior consistency and contraction rates because it is the **natural metric in which Bayesian posterior contraction theorems are formulated** (Schwartz 1965; Ghosal-van der Vaart 2017, Ch. 6).
+
+- **$L^2(\mu)$ norm on the deviation function**: $d_{L^2}(\eta, \eta') = \bigl(\int \|\Delta(x, \theta_{\text{ref}}) - \Delta'(x, \theta_{\text{ref}}')\|^2 \, d\mu(x) \bigr)^{1/2}$. Used for **direct interpretation in terms of the framework's components**: convergence in $d_{L^2}$ of the AMM components is what the analyst usually wants to know.
+
+**Relationship between $d_H$ and $d_{L^2}$ (no global equivalence claim).**
+
+The two distances are **not equivalent in general**. They are linked through the model's link function, but the link can degenerate. Specifically:
+
+- **Local control in the parametric smooth case.** For finite-dim parametric AMM (Levels 0, 1, parametric Level 2) with a smooth, full-rank Fisher information $I_*$ at $\eta_*$, the Hellinger distance and $L^2(\mu)$ distance are **locally equivalent at $\eta_*$**: there exist constants $0 < c_1 < c_2 < \infty$ and a neighborhood $U$ of $\eta_*$ such that
+$$c_1 \, d_{L^2}(\eta, \eta_*) \;\leq\; d_H(\eta, \eta_*) \;\leq\; c_2 \, d_{L^2}(\eta, \eta_*) \quad \text{for } \eta \in U.$$
+This local equivalence is the standard consequence of the Taylor expansion of $\log p_\eta$ at $\eta_*$ (van der Vaart 1998, §5.5) and is what allows results stated in $d_H$ to be translated to $d_{L^2}$ near the truth. **Globally**, no such bound holds in general: the two distances can diverge for $\eta$ far from $\eta_*$ or in non-parametric settings where the link function is not bounded away from singularity.
+
+- **Non-parametric and global cases.** For non-parametric AMM (splines, Gaussian-process priors), the relationship between $d_H$ and $d_{L^2}$ is more delicate and depends on the specific function class. Convergence in $d_H$ does not in general imply convergence in $d_{L^2}$ in the function-space norm of the components; the converse direction also fails for response distributions whose Fisher information is singular at certain $\eta$.
+
+**Practical convention.** Theorems 4A and 4B below are stated in $d_H$ (the natural metric for Bayesian contraction). Their **specialization to $d_{L^2}$** is justified locally near $\eta_*$ via the local-equivalence bound above, which holds for all parametric AMM cases of Block 3. For non-parametric cases, the specialization is restricted to the Hellinger conclusion, with $d_{L^2}$-convergence requiring a separate argument case-by-case.
+
+## **2.3. Notation Summary**
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $\eta = (\theta_{\text{ref}}, a, b, W)$ | AMM parameter |
+| $\eta_* = (\theta_*, a_*, b_*, W_*)$ | True AMM parameter |
+| $\pi$ | Joint prior on $\eta$ |
+| $\Pi_n$ | Posterior given $n$ observations |
+| $p_\eta(x, y)$ | Joint density of $(X, Y)$ under $\eta$ |
+| $K(\eta_*, \eta) = \int p_{\eta_*} \log(p_{\eta_*} / p_\eta) \, d\nu$ | Kullback-Leibler divergence |
+| $V(\eta_*, \eta) = \int p_{\eta_*} (\log(p_{\eta_*} / p_\eta))^2 \, d\nu$ | KL second moment |
+| $B_\varepsilon(\eta_*) = \{\eta : K(\eta_*, \eta) \leq \varepsilon^2,\; V(\eta_*, \eta) \leq \varepsilon^2\}$ | KL-ball of radius $\varepsilon$ around $\eta_*$ |
+| $\Pi_n$-contraction rate $\varepsilon_n$ | A sequence with $\varepsilon_n \to 0$, $n \varepsilon_n^2 \to \infty$, controlling posterior concentration |
+
+---
+
+# **3. Three Asymptotic Layers**
+
+Parallel to Blocks 1-3, the asymptotic question for Path 1 separates into three layers.
+
+**(L1) Posterior consistency.** Does the posterior contract to the true parameter as $n \to \infty$? Formally, for every $\varepsilon > 0$,
+$$\Pi_n\bigl( \{\eta : d(\eta, \eta_*) > \varepsilon\} \,\big|\, Y_{1:n}, X_{1:n} \bigr) \;\xrightarrow{P_{\eta_*}}\; 0.$$
+
+**(L2) Posterior contraction rate.** At what speed $\varepsilon_n \to 0$ does the posterior concentrate? Formally, there exists $M > 0$ and a sequence $\varepsilon_n$ with $n \varepsilon_n^2 \to \infty$ such that
+$$\Pi_n\bigl( \{\eta : d(\eta, \eta_*) > M \varepsilon_n\} \,\big|\, Y_{1:n}, X_{1:n} \bigr) \;\xrightarrow{P_{\eta_*}}\; 0.$$
+
+**(L3) Bernstein-von Mises / Posterior CLT.** Is the posterior asymptotically Gaussian around the MLE? Formally, in a finite-dim parametric setting,
+$$\Pi_n\bigl(\sqrt{n}(\eta - \widehat{\eta}_n) \in \cdot \mid Y_{1:n}\bigr) \;\xrightarrow{w}\; \mathcal{N}(0, I^{-1}_*),$$
+in total variation, where $\widehat{\eta}_n$ is the MLE and $I_*$ the Fisher information at $\eta_*$.
+
+The three layers are progressively stronger: (L1) gives convergence; (L2) gives speed; (L3) gives the limiting distribution. Each requires its own hypotheses, which we collect next.
+
+---
+
+# **4. Standing Asymptotic Hypotheses**
+
+In addition to (C1)-(C6), (LIN), (D-ID), and (IID) from previous blocks, the asymptotic theory requires the following.
+
+**(PRIOR-KL) KL-support of the prior.** For every $\varepsilon > 0$, $\pi(B_\varepsilon(\eta_*)) > 0$. The prior puts positive mass on every Kullback-Leibler neighborhood of the true parameter.
+
+This is the minimal Bayesian regularity for posterior consistency (Schwartz 1965) and is essentially mild: any continuous prior with $\eta_*$ in its support satisfies it under standard smoothness.
+
+**(PRIOR-THICK) Thick prior near the truth.** There exists a sequence $\varepsilon_n \to 0$ with $n \varepsilon_n^2 \to \infty$ such that
+$$\pi(B_{\varepsilon_n}(\eta_*)) \;\geq\; \exp(-C_1 n \varepsilon_n^2)$$
+for some constant $C_1 > 0$. The prior assigns at least exponentially small mass to KL-balls of size $\varepsilon_n$.
+
+(PRIOR-THICK) is the key thickness condition for Ghosal-Ghosh-van der Vaart (2000) contraction rates. For finite-dim parametric AMM (Levels 0, 1) with smooth priors, $\varepsilon_n = n^{-1/2}$ satisfies (PRIOR-THICK). For non-parametric components (splines or function classes of growing dimension), $\varepsilon_n$ depends on the smoothness class.
+
+**(SIEVE) Sieve construction with controlled entropy.** There exists a sequence of measurable sets $\Theta_n \subseteq \Theta \times \mathcal{F}_a \times \mathcal{F}_b \times \mathcal{F}_W$ (the "sieves") such that:
+
+(i) $\pi(\Theta_n^c) \leq \exp(-C_2 n \varepsilon_n^2)$ for some $C_2 > C_1 + 4$, and
+(ii) the **bracketing entropy** $\log N_{[]}(\varepsilon_n, \Theta_n, d_H)$ is bounded by $C_3 n \varepsilon_n^2$ for some $C_3 > 0$.
+
+(SIEVE) provides the metric-entropy control needed to bound the posterior mass on sets far from $\eta_*$. For finite-dim parametric AMM, the sieve can be chosen as a compact subset of the parameter space, with $\log N_{[]}$ growing logarithmically. For non-parametric components, the sieve grows with $n$ and controlling its entropy is a substantive condition.
+
+**(TEST) Existence of test functions.** For every $\varepsilon > \varepsilon_n$, there exists a test sequence $\phi_n : \mathcal{Y}^n \to [0, 1]$ such that
+$$\mathbb{E}_{\eta_*}[\phi_n] \;\leq\; \exp(-C_4 n \varepsilon^2), \qquad \sup_{\eta \in \Theta_n : d(\eta, \eta_*) > \varepsilon} \mathbb{E}_\eta[1 - \phi_n] \;\leq\; \exp(-C_4 n \varepsilon^2).$$
+
+(TEST) provides the discrimination between the truth and parameter values far from it. Under (D-ID) and (LIN), test functions of the form "log-likelihood ratio threshold" typically satisfy (TEST) for parametric AMM.
+
+**(LAN) Local asymptotic normality.** The log-likelihood admits the LAN expansion
+$$\log \frac{p_{\eta_* + h/\sqrt{n}}^n}{p_{\eta_*}^n} \;=\; h^\top \Delta_{n, \eta_*} - \tfrac{1}{2} h^\top I_* h + o_{P_{\eta_*}}(1),$$
+where $\Delta_{n, \eta_*}$ converges in distribution to $\mathcal{N}(0, I_*)$ and $I_* \in \mathbb{R}^{p \times p}$ is the non-singular Fisher information matrix at $\eta_*$.
+
+(LAN) is a standard parametric regularity (van der Vaart 1998, §7.2) and is the foundation for Bernstein-von Mises. It applies to finite-dim parametric AMM (Levels 0, 1, 2 with finite-dim function classes) under smooth log-likelihoods. For non-parametric components, LAN is replaced by a more general "stochastic asymptotic equicontinuity" condition that we discuss in §7 (open questions).
+
+---
+
+# **5. Theorem 4A: Posterior Consistency**
+
+> **Theorem 4A.** **Stated under (R-RANDOM).** Suppose:
+>
+> - (C1)-(C6), (LIN), (D-ID) of Block 1.
+> - (HOM), (REG), (IID) of Block 2.
+> - (PRIOR-KL) and (TEST) above.
+> - The bracketing entropy $\log N_{[]}(\varepsilon, \Theta_n, d_H) < \infty$ for every $\varepsilon > 0$ and a sequence of sieves $\Theta_n$ with $\pi(\Theta_n^c) \to 0$.
+>
+> Then the posterior $\Pi_n(\,\cdot\, \mid Y_{1:n}, X_{1:n})$ is **consistent** at $\eta_*$: for every $\varepsilon > 0$,
+> $$\Pi_n\bigl(\{\eta : d_H(\eta, \eta_*) > \varepsilon\} \mid Y_{1:n}, X_{1:n}\bigr) \;\xrightarrow{P_{\eta_*}}\; 0.$$
+>
+> **(R-COND) variant.** Conditioning on $X_{1:n}$ throughout and replacing $d_H$ by its conditional analog (Hellinger distance on $Y \mid X = x_i$ averaged over the empirical distribution of the design), the same conclusion holds for $\mu^\infty$-a.e. realization of the design under (R-EQUIV).
+
+*Proof sketch.* This is the Schwartz consistency theorem (Schwartz 1965; Ghosal and van der Vaart 2017, Theorem 6.17) specialized to the AMM canonical form. The argument has three parts:
+
+1. **Numerator bound (KL-support):** (PRIOR-KL) implies that the posterior numerator (integrated likelihood over a KL-neighborhood of $\eta_*$) decays no faster than $e^{-2 n \varepsilon^2}$ in probability.
+
+2. **Denominator bound (sieve + tests):** The sieve $\Theta_n$ has small prior complement; outside the sieve, posterior mass is bounded by $\pi(\Theta_n^c) \to 0$. Inside the sieve, the test functions $\phi_n$ (existence guaranteed by bracketing entropy) bound posterior mass on $\{d_H > \varepsilon\}$ by $\exp(-c n \varepsilon^2)$.
+
+3. **Combination:** The numerator-denominator ratio bounds the posterior mass on $\{d_H > \varepsilon\}$, which goes to zero in $P_{\eta_*}$ probability.
+
+The novel step in adapting Schwartz to AMM is the verification of (PRIOR-KL) and bracketing-entropy conditions for the AMM joint prior $\pi_\Theta \otimes \pi_a \otimes \pi_b \otimes \pi_W$. Under (LIN), each component prior is on a finite-dim linear space, and (PRIOR-KL) reduces to positivity of the prior density at $\eta_*$ ---a mild condition satisfied by typical (e.g., Gaussian, Cauchy) priors. $\square$
+
+**Specialization to (REG-EST) of Block 2.** Theorem 4A implies (REG-EST) for Path 1, in the average-error form Block 2's Lemma 2B requires. The argument has three explicit steps:
+
+(i) **Posterior consistency in the data-distance metric.** Theorem 4A gives $\Pi_n(\{\eta : d_H(\eta, \eta_*) > \varepsilon\} \mid Y_{1:n}, X_{1:n}) \to 0$ in $P_{\eta_*}$-probability. Under the local-equivalence bound of §2.2 between $d_H$ and $d_{L^2}$ near $\eta_*$, the posterior also concentrates in $d_{L^2}(\eta, \eta_*)$.
+
+(ii) **Posterior mean inherits the consistency.** Define the posterior mean of the deviation function evaluated at $x_i$:
+$$\widehat{\theta}_i^{\,\text{Bayes}} \;:=\; \int \bigl[\theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}})\bigr] \, d\Pi_n(\eta \mid Y_{1:n}, X_{1:n}).$$
+The functional $\eta \mapsto \theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}})$ is **continuous in $\eta$ for each $x_i$** (it is a finite sum and Hadamard product of continuous-in-$\eta$ components under (LIN) and (C5)), and is uniformly bounded on compact subsets of the parameter space. By a standard posterior-mean continuity argument (Doob's theorem on continuous bounded functionals applied to a contracting posterior; van der Vaart 1998, §10.5), posterior contraction in $d_{L^2}$ implies $\widehat{\theta}_i^{\,\text{Bayes}} \to \theta_*(x_i, \theta_{\text{ref}})$ in $P_{\eta_*}$-probability for each $x_i$, with uniform integrability ensuring the limit holds in $L^1(\mu)$.
+
+(iii) **Average-error form for (REG-EST).** Integrating step (ii) against the empirical distribution of $X_{1:n}$:
+$$\frac{1}{n} \sum_{i=1}^n \bigl\| \widehat{\theta}_i^{\,\text{Bayes}} - \theta_*(x_i, \theta_{\text{ref}}) \bigr\| \;\xrightarrow{P_{\eta_*}}\; \mathbb{E}_\mu\bigl[\bigl\| \theta(X) - \theta_*(X, \theta_{\text{ref}}) \bigr\|\bigr] \;=\; 0,$$
+where the last equality uses (i) at the integral level and (IID) for the empirical distribution to converge to $\mu$.
+
+This establishes (REG-EST) of Block 2 for Path 1 in its average-error form, which is the form Lemma 2B of Block 2 invokes.
+
+**Stronger uniform version.** The uniform-in-$i$ version of (REG-EST) ---$\sup_i \|\widehat{\theta}_i^{\,\text{Bayes}} - \theta_*(x_i, \theta_{\text{ref}})\| \to 0$--- holds when posterior contraction is in **sup-norm** (rather than only Hellinger or $L^2$) and when the covariate support is bounded. This is the case for Path 1 with smooth priors on bounded covariates (Ghosal-van der Vaart 2017, Ch. 8 sup-norm contraction results), but is **not implied by Theorem 4A alone**: it requires an additional sup-norm contraction theorem with its own hypotheses, and is not invoked by Lemma 2B's average-error form.
+
+---
+
+# **6. Theorem 4B: Posterior Contraction Rate**
+
+> **Theorem 4B.** **Stated under (R-RANDOM).** Suppose:
+>
+> - The hypotheses of Theorem 4A.
+> - (PRIOR-THICK) and (SIEVE) above for a sequence $\varepsilon_n \to 0$ with $n \varepsilon_n^2 \to \infty$.
+>
+> Then the posterior contracts at rate $\varepsilon_n$:
+> $$\Pi_n\bigl(\{\eta : d_H(\eta, \eta_*) > M \varepsilon_n\} \mid Y_{1:n}, X_{1:n}\bigr) \;\xrightarrow{P_{\eta_*}}\; 0$$
+> for some constant $M > 0$ depending on $C_1, C_2, C_3, C_4$ in (PRIOR-THICK), (SIEVE), (TEST).
+>
+> **(R-COND) variant.** Conditioning on $X_{1:n}$ throughout and replacing $d_H$ by its conditional analog, the same conclusion holds at the same rate $\varepsilon_n$ for $\mu^\infty$-a.e. realization of the design under (R-EQUIV) and uniform-class conditions on $\mathcal{F}_a, \mathcal{F}_b, \mathcal{F}_W$.
+
+*Proof sketch.* This is the main theorem of Ghosal, Ghosh, and van der Vaart (2000) (see also Ghosal and van der Vaart 2017, Theorem 8.9), specialized to AMM. The argument refines the consistency proof of Theorem 4A by tracking the rate at which each piece (KL-support, sieve mass, test functions) is bounded, and the optimal $\varepsilon_n$ is determined by balancing these rates. $\square$
+
+## **6.1. Specialization to AMM Levels**
+
+The contraction rate $\varepsilon_n$ depends on which AMM Level is being fit and on the function class and prior for non-parametric components. **The rates stated below are established under explicit conditions on the prior** (matched smoothness, Gaussian-process kernel scaling, etc.); without those conditions, the actual rate can be slower or undefined.
+
+**AMM Level 0 (standard regression, Theorem 3.1):** $\varepsilon_n = n^{-1/2}$. Standard parametric rate; (PRIOR-THICK) holds for smooth priors of essentially any reasonable form (Gaussian, Cauchy, Student-$t$).
+
+**AMM Level 1 (linear additive, Theorem 3.2):** For linear-coefficient parametric $a$, $\varepsilon_n = n^{-1/2}$. Same rate condition as Level 0 applied to the augmented parameter vector $(\theta_{\text{ref}}, A)$.
+
+**AMM Level 1 (Hastie-Tibshirani VCM, Theorem 3.4):** For splines of **fixed** dimension $J$, $\varepsilon_n = (J/n)^{1/2}$. For splines adapted to a $\beta$-Sobolev smooth $a$ with the smoothness $\beta$ **known and matched** by the prior, the optimal rate $\varepsilon_n = n^{-\beta/(2\beta + d)}$ is achieved (Ghosal and van der Vaart 2017, Ch. 11). For **adaptive priors** that achieve this rate without requiring the user to specify $\beta$, additional conditions on the prior are needed (van der Vaart and van Zanten 2009 for Gaussian-process priors with inverse-gamma bandwidth); the library defaults to a standard adaptive prior under which the optimal rate holds for $\beta > d/2$ but the rate is not formally proved beyond this regime.
+
+**AMM Level 2 (canonical AMM, Theorem 3.6):** For fully parametric $a, b$ (finite-dim bases), $\varepsilon_n = n^{-1/2}$. For non-parametric $a, b, W$ via splines or Gaussian-process priors, the rate is determined by the slowest component, **subject to the same prior-matching caveats** as in the VCM case. The rate **need not** be the geometric mean or simple combination of component rates: the joint posterior is constrained by the joint prior, and the rate at which the joint distance contracts depends on the dependence structure of the prior across components. **Numerical verification per problem is recommended** (§6.2).
+
+**AMM Level $\infty$ (hypernetwork):** Outside Path 1's scope; treated in Block 6 with explicit recognition of the open contraction-rate question for Bayesian neural networks.
+
+**General prudence on non-parametric rates.** The rates above for non-parametric AMM are **conditional on prior matching** and on standard regularity (smoothness in a Sobolev or Hölder class, prior with appropriate concentration). When the true smoothness or function class is unknown, only the **slowest applicable rate** under the user's adaptive prior should be invoked. The library reports the empirical contraction rate (§6.2 below) and warns when it diverges substantively from the predicted rate, which can indicate prior misspecification or true smoothness lower than the adaptive prior assumes.
+
+## **6.2. Numerical Verification of Contraction**
+
+The library implements an empirical verification of contraction: at multiple sample sizes $n_1 < n_2 < \cdots < n_K$ (typically subsets of the data), refit the model and compute the **posterior credible-set diameter** (e.g., 95% credible interval width) for each parameter. The diameter should shrink at the predicted rate $\varepsilon_n$. Deviations from the predicted rate are flagged as evidence of either (i) prior misspecification, (ii) model misspecification under failure of (HOM) or (REG), or (iii) non-parametric components whose smoothness assumption does not match the true function.
+
+---
+
+# **7. Theorem 4C: Bernstein-von Mises**
+
+> **Theorem 4C.** **Stated under (R-RANDOM).** Suppose:
+>
+> - The hypotheses of Theorem 4A and 4B.
+> - (LAN) at $\eta_*$ with non-singular Fisher information $I_*$.
+> - The parameter space is finite-dim parametric (AMM Level 0, 1, or 2 with all of $a, b, W$ in finite-dim parametric classes).
+> - The MLE $\widehat{\eta}_n$ exists, is consistent, and $\sqrt{n}(\widehat{\eta}_n - \eta_*) \xrightarrow{d} \mathcal{N}(0, I^{-1}_*)$ (standard parametric MLE asymptotics).
+>
+> Then the posterior is asymptotically Gaussian around $\widehat{\eta}_n$:
+> $$\sup_{B \subseteq \mathbb{R}^p \text{ Borel}} \;\Bigl| \Pi_n\bigl(\sqrt{n}(\eta - \widehat{\eta}_n) \in B \,\big|\, Y_{1:n}, X_{1:n}\bigr) - \mathcal{N}(0, I^{-1}_*)(B) \Bigr| \;\xrightarrow{P_{\eta_*}}\; 0.$$
+> The convergence is in total variation distance, where the posterior is the standard Bayesian posterior of $\eta$ given the observed sample $\{(X_i, Y_i)\}_{i=1}^n$ under (R-RANDOM); the (R-COND) version yields the same conclusion by conditioning, with $\widehat{\eta}_n$ and $I_*$ becoming the conditional MLE and conditional Fisher information given $X_{1:n}$.
+
+*Proof sketch.* This is the Bernstein-von Mises theorem (van der Vaart 1998, Theorem 10.1), which asserts that for parametric models with LAN log-likelihood and consistent MLE, the posterior coincides with the limiting Gaussian distribution of the MLE up to vanishing total variation distance. The proof proceeds by approximating the log-posterior with the LAN expansion and showing the remainder is uniformly small in total variation. Specialization to AMM Level $\leq 2$ with finite-dim parametric classes is direct: under (LIN), the parameter space is Euclidean and (LAN) holds under smooth log-likelihood. $\square$
+
+**Practical content.** Under Theorem 4C, the posterior 95% credible intervals and the asymptotic-normal frequentist 95% confidence intervals coincide asymptotically. This justifies the framework's reporting of Bayesian credible intervals as the primary uncertainty quantification: they are calibrated to the same coverage as classical CIs in the limit.
+
+## **7.1. Semiparametric Bernstein-von Mises (Partial Result)**
+
+> **Proposition 4C-semi.** **Stated under (R-RANDOM).** Suppose AMM Level 2 with **finite-dim parametric $\theta_{\text{ref}}$** and **non-parametric $a, b, W$** (e.g., spline or Gaussian-process priors on the functional components). Let $\eta = (\theta_{\text{ref}}, a, b, W)$. Under additional conditions on the bias/variance trade-off in the non-parametric components (Castillo and Rousseau 2015), the **marginal posterior of $\theta_{\text{ref}}$** ---obtained by integrating $(a, b, W)$ out of the joint posterior given the observed sample $\{(X_i, Y_i)\}_{i=1}^n$--- satisfies:
+> $$\sqrt{n}\bigl(\theta_{\text{ref}} - \widehat{\theta}_{\text{ref}, n}^{\,\text{semi-MLE}}\bigr) \,\big|\, Y_{1:n}, X_{1:n} \;\xrightarrow{w}\; \mathcal{N}(0, V_*),$$
+> where $V_*$ is the **semiparametric efficiency bound** (Bickel et al. 1993) at $\eta_*$. The (R-COND) variant yields the same weak-limit conclusion by conditioning, with $V_*$ becoming the conditional efficiency bound at the observed design.
+
+**Scope of the conclusion: explicit and tight.**
+
+> **The Bernstein-von Mises conclusion of Proposition 4C-semi applies *only* to the marginal posterior of the parametric component $\theta_{\text{ref}}$.** It says nothing about the joint posterior over the non-parametric block $(a, b, W)$, nor about the marginal posteriors of $a$, $b$, or $W$ individually. The function-valued components $(a, b, W)$ may follow distributions in $L^2$ or in a Sobolev space that are **not asymptotically Gaussian** in a function-space metric, and Proposition 4C-semi does not assert otherwise.
+
+*Argument outline.* Castillo and Rousseau (2015) provide conditions for semiparametric BvM in mixed (parametric/non-parametric) Bayesian models. Specialization to AMM with parametric $\theta_{\text{ref}}$ and non-parametric $(a, b, W)$ requires verification of two conditions:
+
+(i) the non-parametric components are estimable at a rate fast enough to leave the parametric component's $\sqrt{n}$ rate intact (the "$\sqrt{n}$-recoverability" condition);
+
+(ii) the prior on $(a, b, W)$ is "least-favorable-direction-aware" in the sense of inducing the right semiparametric Fisher information for $\theta_{\text{ref}}$.
+
+The first condition holds for $a, b, W$ in Sobolev spaces of smoothness $\beta > d/2$; the second is satisfied by standard Gaussian-process priors with appropriate kernels. **Both conditions are about the function-valued components doing what is needed *for* $\theta_{\text{ref}}$'s BvM to hold; they do not establish BvM for the function-valued components themselves.**
+
+**Caveat: full BvM for non-parametric components is open.** A **full BvM** for the function-valued components $(a, b, W)$ ---asserting that the full posterior over the function-valued parameters is asymptotically Gaussian in a function-space metric--- is **not generally available**. The non-parametric BvM literature (Cox 1993; Freedman 1999; Kim 2006) gives partial results under specific function-space topologies (typically weak topologies, or under restrictive smoothness and prior matching conditions) but no general theorem analogous to Theorem 4C exists for the AMM canonical form with non-parametric components. Block 6 returns to this question in connection with the asymptotic theory of Bayesian neural networks (Path 3), where the open problem is even more pronounced.
+
+**Practical consequence for inference on $(a, b, W)$.** Confidence/credible intervals for the function-valued components in Path 1 should be reported as **posterior credible intervals at the function-space level** (Hellinger or $L^2(\mu)$ contraction balls, as in Theorem 4B), **not** as Gaussian-approximated $\sqrt{n}$ intervals. The library reports credible intervals derived from posterior quantiles directly, without invoking the BvM Gaussian approximation outside the parametric subspace.
+
+---
+
+# **8. Specialization to AMM Special Cases (Block 3)**
+
+We verify how the asymptotic theorems of this block specialize to each special case from Block 3.
+
+| Special Case | AMM Level | Theorem 4A applies? | Contraction rate $\varepsilon_n$ | BvM applies? |
+|:-------------|:---------:|:-------------------:|:--------------------------------:|:------------:|
+| Linear regression (Theorem 3.1) | 0 | ✓ | $n^{-1/2}$ | ✓ (Theorem 4C) |
+| Hierarchical with covariate REs (Theorem 3.2) | 1 | ✓ | $n^{-1/2}$ | ✓ (Theorem 4C) |
+| Random-coefficient (Theorem 3.3, marginal) | 1 (marginal) | ✓ for marginal | $n^{-1/2}$ for $\beta$; $\Sigma_\nu$ depends on (R2) | Partial |
+| Hastie-Tibshirani VCM (Theorem 3.4) | 1 | ✓ | $(J/n)^{1/2}$ for fixed-$J$ splines; $n^{-\beta/(2\beta+d)}$ for adaptive | Semi (Prop. 4C-semi) |
+| Reference-modulated VCM (Theorem 3.5) | 2 with $b \equiv 0$ | ✓ | Same as 3.4, with extra factor for $W$ | Semi (Prop. 4C-semi) |
+| Hierarchical Bayesian + multiplicative (Theorem 3.6) | 2 with $W \equiv 0$ | ✓ | $n^{-1/2}$ for parametric bases; slower for non-parametric | Theorem 4C for parametric; semi for non-parametric |
+| Hypernetwork (Proposition 3.7) | $\infty$ | Block 6 (open) | Open | Open |
+
+The pattern is consistent: parametric AMM (finite-dim function classes) gets the full $n^{-1/2}$ rate and full BvM via Theorem 4C; non-parametric AMM gets contraction at the smoothness-dependent rate and semi-BvM for the parametric subset of the parameters.
+
+---
+
+# **9. Open Questions**
+
+The asymptotic theory of Path 1 has three identified gaps that the framework does not close at this level of generality.
+
+**(O1) Full BvM for non-parametric AMM components.** Theorem 4C and Proposition 4C-semi cover parametric and semiparametric BvM. A full BvM for the non-parametric components $(a, b, W)$ in a function-space metric is open in general; partial results are available in specific Sobolev-space topologies (Cox 1993; Freedman 1999), but no theorem analogous to Theorem 4C exists for AMM with non-parametric components in general.
+
+**(O2) Adaptive contraction rates.** Theorem 4B gives the contraction rate $\varepsilon_n$ assuming the smoothness of the true parameter is known and the prior is matched to it. **Adaptive priors** ---priors that achieve the optimal rate without requiring the user to specify the true smoothness--- are available for some non-parametric Bayesian models (van der Vaart and van Zanten 2009 for Gaussian-process priors). Their adaptation to the AMM canonical form is treated in Block 5 (for Path 2 splines) but not closed in general for Path 1 with arbitrary priors.
+
+**(O3) Misspecification and pseudo-true parameters.** When (HOM) or (REG) of Block 2 fail, the posterior contracts to a pseudo-true parameter (the KL-projection of the data-generating distribution onto the model class; White 1982; Kleijn and van der Vaart 2012). The theorems above assume correct specification. Misspecification asymptotics for AMM Path 1 specialize results of Kleijn and van der Vaart (2012); detailed treatment is left to a separate companion document.
+
+These open questions are explicitly recognized: the framework does not claim to close them and presents the asymptotic theory at the level of generality at which it is established.
+
+---
+
+# **10. Implementation Implications for Path 1 (Stan / cmdstanr)**
+
+The Path 1 implementation in `gdpar` produces posterior samples via Hamiltonian Monte Carlo through Stan. The asymptotic theory of this block translates into operational diagnostics.
+
+### **10.1. Prior Specification and (PRIOR-KL), (PRIOR-THICK)**
+
+The default priors in the library are chosen to satisfy (PRIOR-KL) and (PRIOR-THICK) for typical AMM specifications:
+
+- $\pi_\Theta$: weakly informative Gaussian or Student-$t$ on $\theta_{\text{ref}}$, with positive density throughout $\Theta$.
+- $\pi_a, \pi_b$: hierarchical Gaussian-process or B-spline coefficient priors with appropriate hyperpriors on smoothness and scale.
+- $\pi_W$: matrix-valued Gaussian-process or polynomial-coefficient prior with anchoring at $\theta_0$.
+
+The library reports the prior's effective KL-support at the posterior mean as a diagnostic: if the support is too narrow, (PRIOR-KL) may be in doubt and the contraction conclusion is weakened.
+
+### **10.2. Convergence Diagnostics and (TEST), (SIEVE)**
+
+Stan's standard convergence diagnostics ($\hat{R}$, effective sample size, divergent transitions) provide indirect verification of (TEST) and (SIEVE):
+- High $\hat{R}$ or low ESS signal that the posterior has not yet contracted enough for the chains to mix, often correlated with violations of (TEST) or (SIEVE).
+- Divergent transitions signal local geometric pathologies that may correspond to multimodality from latent stratification (failure of (HOM) of Block 2) rather than from lack of contraction.
+
+The library combines Stan's diagnostics with the AMM-specific identifiability checks of Block 1's Proposition 1C and reports a unified convergence verdict.
+
+### **10.3. Bernstein-von Mises Calibration Check**
+
+When Theorem 4C applies (parametric AMM), the library compares posterior credible intervals against asymptotic confidence intervals computed by maximum-likelihood with the Hessian-based covariance estimator. Substantial discrepancy at large $n$ signals either (i) BvM has not kicked in yet (small effective sample size), or (ii) (LAN) fails (e.g., singular Fisher information at $\eta_*$, suggesting the model is at a boundary).
+
+### **10.4. (REG-EST) of Block 2 Specialized to Path 1**
+
+Under Theorems 4A or 4B, (REG-EST) of Block 2 holds for Path 1 in the form
+$$\frac{1}{n} \sum_{i=1}^n \bigl\| \widehat{\theta}_i^{\,\text{Bayes}} - \theta_*(x_i, \theta_{\text{ref}}) \bigr\| \;\xrightarrow{P}\; 0,$$
+where $\widehat{\theta}_i^{\,\text{Bayes}} = \theta_{\text{ref}} + \Delta(x_i, \widehat{\eta}_n^{\,\text{Bayes}})$ is the posterior mean of the individual parameter. This is the form Lemma 2B of Block 2 invokes; with Theorem 4A in this block, Lemma 2B's hypothesis is verified for Path 1.
+
+---
+
+# **11. Summary**
+
+This block has established:
+
+1. **Three layers of asymptotic theory** for Path 1 (consistency, contraction rate, Bernstein-von Mises), parallel to the three-layer architecture of Blocks 1-3.
+
+2. **Standing asymptotic hypotheses** ---(PRIOR-KL), (PRIOR-THICK), (SIEVE), (TEST), (LAN)--- nominated, formally stated, and connected to standard Bayesian nonparametrics (Schwartz 1965; Ghosal-Ghosh-van der Vaart 2000; Ghosal-van der Vaart 2017).
+
+3. **Theorem 4A (Posterior Consistency)**, specializing the Schwartz consistency theorem to AMM under (PRIOR-KL) plus sieve and test conditions.
+
+4. **Theorem 4B (Posterior Contraction Rate)**, specializing the GGV rate theorem to AMM with rate $\varepsilon_n$ depending on the AMM Level and on the smoothness of non-parametric components. **For parametric AMM**, the standard $\varepsilon_n = n^{-1/2}$ rate is established. **For non-parametric AMM**, the rate depends on the smoothness class of the components and on the prior being matched to that smoothness; under unmatched priors or unknown true smoothness, the actual rate may be slower and is only verifiable empirically (§6.1, §6.2).
+
+5. **Theorem 4C (Bernstein-von Mises)** in the finite-dim parametric AMM case, with **Proposition 4C-semi** treating semiparametric BvM **for the parametric component $\theta_{\text{ref}}$ marginally** under Castillo-Rousseau (2015) conditions ---**not** for the function-valued components $(a, b, W)$, whose function-space BvM remains an open question.
+
+6. **Specialization to Block 3 special cases**, with a tabular summary of which results apply to which case.
+
+7. **Three explicitly recognized open questions** (full non-parametric BvM; adaptive contraction rates for general AMM; misspecification asymptotics under failure of (HOM)+(REG)).
+
+8. **Implementation diagnostics** for Path 1 in Stan/cmdstanr, including (REG-EST) verification for Lemma 2B of Block 2.
+
+The block does not claim to close the gaps in the asymptotic theory of non-parametric Bayesian models with AMM structure; it specializes existing results from Bayesian nonparametrics to AMM and recognizes open questions explicitly where they appear.
+
+---
+
+# **12. Connections to Subsequent Blocks**
+
+- **Block 5** (Asymptotics for Path 2, varying-coefficient via mgcv) treats the frequentist analog of this block's results: pointwise and uniform consistency of the spline estimator, asymptotic normality, with conditions specialized to penalized spline fitting (Fan and Zhang 2008; Stone 1985; Wood 2017).
+- **Block 6** (Asymptotics for Path 3, hypernetwork) treats the partial results available for Bayesian neural networks (Bach 2017; Dziugaite-Roy 2017; Hron et al. 2020), with explicit recognition of the open questions in BvM and contraction rate for the hypernetwork case.
+- **Block 7** (Empirical Bayes vs. Fully Bayes) interacts with Theorem 4B's contraction rate via the comparison between EB and FB priors on $\theta_{\text{ref}}$.
+- **Block 8** (CATE/ITE positioning) places the asymptotic theory of AMM in the context of heterogeneous treatment effect estimation, where contraction-rate questions for individualized estimands have a parallel literature (Wager and Athey 2018; Künzel et al. 2019).
+
+---
+
+# **Appendix A. Asymptotic Notation**
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $\eta = (\theta_{\text{ref}}, a, b, W)$ | Full AMM parameter |
+| $\eta_*$ | True AMM parameter |
+| $\Pi_n$ | Posterior given $n$ observations |
+| $\pi$ | Joint prior on $\eta$ |
+| $K(\eta_*, \eta)$ | Kullback-Leibler divergence |
+| $V(\eta_*, \eta)$ | KL second moment |
+| $B_\varepsilon(\eta_*)$ | KL-ball of radius $\varepsilon$ around $\eta_*$ |
+| $\varepsilon_n$ | Posterior contraction rate |
+| $d_H, d_{L^2}$ | Hellinger, $L^2(\mu)$ distances on parameter space |
+| $\Theta_n$ | Sieve at sample size $n$ |
+| $N_{[]}(\varepsilon, \Theta_n, d_H)$ | Bracketing covering number of $\Theta_n$ at radius $\varepsilon$ |
+| $I_*$ | Fisher information at $\eta_*$ |
+
+---
+
+# **Appendix B. Asymptotic Hypothesis Table**
+
+| Hypothesis | Content | Used by |
+|:-----------|:--------|:--------|
+| (R-RANDOM) | Random design: $X_i \overset{\text{iid}}{\sim} \mu$ jointly with $Y_i$ | Default for §5-7 |
+| (R-COND) | Fixed/conditional design: posterior conditional on observed $X_{1:n}$ | Variant for §5-7 |
+| (R-EQUIV) | Random-conditional equivalence under uniform Glivenko-Cantelli on $\mu$ | Bridge between (R-RANDOM) and (R-COND) |
+| (PRIOR-KL) | $\pi(B_\varepsilon(\eta_*)) > 0$ for every $\varepsilon > 0$ | Theorem 4A |
+| (PRIOR-THICK) | $\pi(B_{\varepsilon_n}(\eta_*)) \geq \exp(-C_1 n \varepsilon_n^2)$ | Theorem 4B |
+| (SIEVE) | Sieve $\Theta_n$ with $\pi(\Theta_n^c) \leq \exp(-C_2 n \varepsilon_n^2)$ and bracketing entropy bounded by $C_3 n \varepsilon_n^2$ | Theorems 4A, 4B |
+| (TEST) | Existence of test functions with exponential type-I and type-II error decay | Theorems 4A, 4B |
+| (LAN) | Local asymptotic normality at $\eta_*$ with non-singular $I_*$ | Theorem 4C |
+
+---
+
+# **References Cited in This Block**
+
+Bickel, P. J., Klaassen, C. A. J., Ritov, Y., and Wellner, J. A. (1993). *Efficient and Adaptive Estimation for Semiparametric Models*. Johns Hopkins University Press.
+
+Castillo, I., and Rousseau, J. (2015). A Bernstein-von Mises theorem for smooth functionals in semiparametric models. *Annals of Statistics*, 43(6), 2353--2383.
+
+Cox, D. D. (1993). An analysis of Bayesian inference for nonparametric regression. *Annals of Statistics*, 21(2), 903--923.
+
+Fan, J., and Zhang, W. (2008). Statistical methods with varying coefficient models. *Statistics and Its Interface*, 1(1), 179--195.
+
+Freedman, D. (1999). On the Bernstein-von Mises theorem with infinite-dimensional parameters. *Annals of Statistics*, 27(4), 1119--1140.
+
+Ghosal, S., Ghosh, J. K., and van der Vaart, A. W. (2000). Convergence rates of posterior distributions. *Annals of Statistics*, 28(2), 500--531.
+
+Ghosal, S., and van der Vaart, A. (2017). *Fundamentals of Nonparametric Bayesian Inference*. Cambridge University Press.
+
+Kim, Y. (2006). The Bernstein-von Mises theorem for the proportional hazard model. *Annals of Statistics*, 34(4), 1678--1700.
+
+Kleijn, B. J. K., and van der Vaart, A. W. (2012). The Bernstein-von Mises theorem under misspecification. *Electronic Journal of Statistics*, 6, 354--381.
+
+Schwartz, L. (1965). On Bayes procedures. *Zeitschrift für Wahrscheinlichkeitstheorie und Verwandte Gebiete*, 4, 10--26.
+
+Stone, C. J. (1985). Additive regression and other nonparametric models. *Annals of Statistics*, 13(2), 689--705.
+
+van der Vaart, A. W. (1998). *Asymptotic Statistics*. Cambridge University Press.
+
+van der Vaart, A. W., and van Zanten, J. H. (2009). Adaptive Bayesian estimation using a Gaussian random field with inverse gamma bandwidth. *Annals of Statistics*, 37(5B), 2655--2675.
+
+van der Vaart, A. W., and Wellner, J. A. (1996). *Weak Convergence and Empirical Processes*. Springer.
+
+White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1--25.
+
+Wood, S. N. (2017). *Generalized Additive Models: An Introduction with R*, 2nd ed. Chapman and Hall/CRC.

@@ -1,0 +1,432 @@
+---
+title: "**Regression Testing of MCMC Outputs (Experimental)**"
+subtitle: "Snapshotting fits with `gdpar_snapshot_fit()` and comparing with `gdpar_golden_compare()`"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Regression Testing of MCMC Outputs (Experimental)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  collapse = TRUE, comment = "#>"
+)
+have_cmdstan <- requireNamespace("cmdstanr", quietly = TRUE)
+```
+
+---
+
+> **Status: experimental.** The two functions documented here,
+> `gdpar_snapshot_fit()` and `gdpar_golden_compare()`, are flagged
+> \emph{experimental} via Roxygen. The snapshot schema is at
+> `schema_version = 1L`; future Blocks 6-9 of the development roadmap
+> may add fields and bump the schema with documented migration. The
+> tolerance contract (`k_sigma`, sanity floors) is also subject to
+> refinement until the first stable release. Plan accordingly when
+> committing goldens to long-lived archives: re-generate after every
+> minor package bump until the schema stabilises.
+
+---
+
+# **1. What this vignette covers**
+
+Locking the posterior of a fitted Bayesian model against future regressions is uncomfortable: floating-point noise across cmdstan versions, RNG implementation drift, and refactors of the sampling-side codepath all generate spurious diffs under naive bit-exact comparison. Conversely, a tolerant comparison that ignores small numerical changes can silently accept genuine regressions in posterior means, ESS, or divergence counts.
+
+The package exposes two functions for regression testing of MCMC outputs that combine bit-exact comparison where it is principled (integer sampler diagnostics), Monte Carlo standard error as the principled tolerance on posterior summaries, structural diffs that flag silent API changes before any numerical comparison runs, and absolute sanity floors that must hold regardless of the golden:
+
+- `gdpar_snapshot_fit(fit)` extracts the four-layer snapshot from a fitted model.
+- `gdpar_golden_compare(observed, golden, k_sigma = 3, sanity_floor = NULL)` compares two snapshots in pipeline order, aggregating failures across layers.
+
+This vignette documents:
+
+1. The four layers of the snapshot schema and the rationale behind the tolerance contract per layer.
+2. The end-to-end workflow: snapshot at baseline, persist, refit, compare.
+3. The `k_sigma` and `sanity_floor` knobs and when to tune them.
+4. Failure interpretation: how to read the `failures` data.frame returned by the comparator.
+5. Integration with `testthat`: how the package's own env-gated `golden_regression` tests use these functions.
+6. Known limitations and the experimental contract policy.
+
+For the calibration of the parametrisation decision (a different quality assurance dimension), see `vignette("vop02_arbitrary_p", package = "gdpar")` Section 9. The two tools are complementary: the reporter of `vop02` locks the *decision* of the pre-flight across scenarios; the comparator of this vignette locks the *realised draws* of a long fit.
+
+---
+
+# **2. The four-layer snapshot schema**
+
+The snapshot returned by `gdpar_snapshot_fit(fit)` is a list with five top-level fields:
+
+```
+list(
+  structural               = list(...),  # layer A: class signatures, shapes
+  discrete                 = list(...),  # layer B: integer sampler diagnostics
+  continuous               = list(...),  # layer C: per-variable posterior + MC SE
+  sanity                   = list(...),  # layer D: aggregated convergence floors
+  parametrization_resolved = list(...)   # resolved CP/NCP flags + aggregation
+)
+```
+
+The four numbered layers are evaluated in pipeline order by `gdpar_golden_compare()`. The fifth field (`parametrization_resolved`) is recorded for auditability and is not directly compared; differences in the resolved parametrisation typically surface indirectly via structural or discrete diffs.
+
+## **2.1. Layer A — Structural (class signatures, shapes)**
+
+The structural snapshot records:
+
+- `fit_class`, `coef_class`: the class chain of the fit and of `coef(fit)`.
+- `p`, `theta_ref_nrow`, `theta_ref_cols`: shape of the `theta_ref` summary.
+- `components`, `parametrization_keys`: which top-level slots are present in `coef()` and which CP/NCP slots are present in `fit$parametrization`. Both are treated as *sets*, not as ordered vectors, so a refactor that reorders the slot names but preserves the set passes.
+- `a_class`, `a_length`, `b_class`, `b_length`, `W_class`, `W_length`: the shape of each per-component slot.
+- `a_per_k_cols`: the column names of each per-coordinate `a` data.frame, in coordinate order.
+
+The comparator distinguishes ordered comparisons (`identical()`) from unordered ones (`setequal()`) per field. Ordered fields detect changes in semantically meaningful order (class inheritance chain, fixed-position summary columns); unordered fields tolerate refactors that permute slot names without changing the set. The structural layer therefore detects silent API changes (new slots, renamed columns, removed components) before any numerical comparison runs.
+
+The keys of `fit$parametrization` are sorted with `sort(method = "radix")` to make the snapshot deterministic across locales. Without `radix`, `testthat::test()` (which sets `LC_COLLATE = C`) and a manual `Rscript` run with the system locale would produce different orderings for the same set, generating spurious diffs.
+
+## **2.2. Layer B — Discrete (bit-exact integer diagnostics)**
+
+The discrete snapshot records integer-valued sampler diagnostics:
+
+- `n_divergent`: total number of divergent transitions across chains.
+- `treedepth_max_n`: number of transitions that hit `max_treedepth`.
+- `treedepth_max_value`: maximum tree depth observed across draws.
+- `n_leapfrog_total_per_chain`: per-chain total leapfrog evaluations.
+- `ebfmi_min`: minimum E-BFMI across chains (numeric, but compared bit-exact via the layer because the diagnostic surface is discrete in the same logical sense).
+
+The comparator enforces bit-exact agreement on every integer field. The motivation is that any change in these diagnostics indicates a change in the sampler trajectory: a new divergence is a regression, a different leapfrog count means the NUTS retuned differently. The bit-exact contract is tied to a specific cmdstan version (currently 2.38.0). When upgrading cmdstan and NUTS retuning shifts the leapfrog count for the same seed and data, the recommended migration is to move `n_leapfrog_total_per_chain` from bit-exact to relative tolerance (e.g., within 5 %), not to weaken the rule across the board.
+
+## **2.3. Layer C — Continuous (Monte Carlo standard error tolerance)**
+
+The continuous snapshot records, per parameter element matching the prefix of `theta_ref`, `a_coef`, `sigma_a`, `sigma_y`, and `lp__`:
+
+- `mean`, `sd`, `ess_bulk`, `ess_tail`, `rhat`: standard posterior summaries from `posterior::summarise_draws()`.
+- `mc_se`: Monte Carlo standard error of the mean, computed as `sd / sqrt(ess_bulk)`.
+
+The comparator tolerance for the mean is
+
+$$|\bar\mu_{\text{obs}} - \bar\mu_{\text{exp}}| \le k_\sigma \cdot \mathrm{MC\_SE}_{\text{exp}},$$
+
+with `k_sigma = 3` as the default. The contract is principled: `MC_SE` is the asymptotic standard error of the posterior mean estimator under MCMC sampling noise, so $k_\sigma \cdot \mathrm{MC\_SE}$ is the band within which two repeated fits of the same model are expected to agree under independent RNG seeds. The contract auto-adapts to the precision of the golden simulation: a golden with high ESS produces a narrow tolerance band; a golden with low ESS produces a wider one.
+
+Compared to a fixed relative tolerance (e.g., "within 5 %"), the `k_sigma * MC_SE` contract has two structural advantages:
+
+- It does not over-flag near-zero parameters where small absolute drifts blow up relative differences.
+- It does not under-flag parameters with high uncertainty where a 5 % drift is well below the sampling noise floor.
+
+Compared to bit-exact comparison, it does not over-flag floating-point noise from cmdstan upgrades or basic-arithmetic refactors that change accumulation order.
+
+When `k_sigma` should be tightened (more sensitive detection): if the project does not tolerate posterior mean drift larger than one MC SE for some parameter, set `k_sigma = 1.5` or `k_sigma = 2`. When `k_sigma` should be loosened: if the golden was produced with too-low ESS and the band is unrealistically narrow, increase `k_sigma` to 4 or 5, but consider regenerating the golden with longer chains as the first option.
+
+## **2.4. Layer D — Sanity (absolute floors)**
+
+The sanity snapshot records aggregates that must hold regardless of the golden:
+
+- `rhat_max`: maximum R-hat across all parameters.
+- `ess_bulk_min`, `ess_tail_min`: minimum bulk and tail ESS.
+- `divergent_pct`: divergent transitions as a fraction of total sampling iterations.
+- `ebfmi_min`: minimum E-BFMI.
+
+The comparator applies absolute thresholds:
+
+```
+sanity_floor = list(
+  rhat_max      = 1.05,
+  ess_bulk_min  = 100,
+  ess_tail_min  = 100,
+  divergent_pct = 0.01,
+  ebfmi_min     = 0.3
+)
+```
+
+Layer D is defence-in-depth: a fit that passes layers A-C against an obsolete golden but violates the absolute floors is still flagged. This catches the failure mode where a buggy refactor produces a fit that matches a buggy golden numerically but is itself diagnostically broken. The `sanity_floor` argument of `gdpar_golden_compare()` accepts a partial override that is merged onto the defaults via `utils::modifyList()`.
+
+## **2.5. The `parametrization_resolved` audit field**
+
+The fifth field of the snapshot records the resolved CP/NCP decisions of the fit:
+
+- `cp_a`, `cp_W`: aggregated per-component flags.
+- `cp_a_per_k`, `cp_W_per_k`: per-coordinate decisions for multivariate fits.
+- `aggregation`: the strategy used (`"any_ncp"`, `"majority"`, `"per_k"`).
+
+This field is not directly compared by `gdpar_golden_compare()`; differences usually surface indirectly via the discrete or continuous layers (a different parametrisation typically produces a different leapfrog count, different MC SE, etc.). The field is recorded so that failure forensics can immediately distinguish "the model was sampled differently" from "the sampler regressed in the same parametrisation".
+
+---
+
+# **3. End-to-end workflow**
+
+The intended workflow has three steps: snapshot a reference fit, persist the snapshot, and compare future fits against it. The two functions and `saveRDS()` / `readRDS()` are the only API surface needed.
+
+## **3.1. Step 1 — Snapshot a reference fit**
+
+Fit the model under the configuration you want to lock (seed, iter counts, parametrisation), then call `gdpar_snapshot_fit()`:
+
+```{r snapshot-baseline, eval=have_cmdstan}
+library(gdpar)
+
+set.seed(42L)
+n <- 200L
+df <- data.frame(x1 = rnorm(n), x2 = rnorm(n))
+df$y <- 1 + 0.6 * df$x1 - 0.4 * df$x2 + rnorm(n, sd = 0.3)
+
+spec <- amm_spec(a = ~ x1 + x2)
+
+fit <- gdpar(
+  formula       = y ~ x1 + x2,
+  family        = gdpar_family("gaussian"),
+  amm           = spec,
+  data          = df,
+  iter_warmup   = 500L,
+  iter_sampling = 500L,
+  chains        = 2L,
+  refresh       = 0L,
+  verbose       = FALSE,
+  seed          = 42L
+)
+
+snap_baseline <- gdpar_snapshot_fit(fit)
+names(snap_baseline)
+```
+
+The snapshot is a plain list; printing it directly is verbose. Inspect specific layers:
+
+```{r snapshot-inspect, eval=have_cmdstan}
+snap_baseline$structural$p
+snap_baseline$structural$components
+snap_baseline$discrete
+snap_baseline$sanity
+head(names(snap_baseline$continuous$theta_ref))
+snap_baseline$continuous$theta_ref[[1L]]
+```
+
+## **3.2. Step 2 — Persist the snapshot**
+
+Store the snapshot wrapped together with provenance metadata (cmdstan version, seed, iter counts, package version):
+
+```{r persist-illustrative, eval=FALSE}
+golden <- c(
+  list(
+    schema_version  = 1L,
+    scenario_id     = "my_baseline",
+    gdpar_version   = as.character(utils::packageVersion("gdpar")),
+    cmdstan_version = cmdstanr::cmdstan_version(),
+    R_version       = R.version.string,
+    seed            = 42L,
+    n               = nrow(df),
+    p               = 1L,
+    n_warmup        = 500L,
+    n_sampling      = 500L,
+    n_chains        = 2L,
+    generated_at    = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  ),
+  snap_baseline
+)
+saveRDS(golden, file = "tests/regression/golden_my_baseline.rds")
+```
+
+The schema versioning field allows a future schema bump to detect obsolete goldens and refuse the comparison until they are regenerated. The provenance fields are not consumed by the comparator but make the failure forensics tractable when the golden is years old.
+
+## **3.3. Step 3 — Compare a fresh fit against the golden**
+
+Refit with the same configuration (or under a new package version after a refactor) and compare:
+
+```{r compare-illustrative, eval=FALSE}
+golden <- readRDS("tests/regression/golden_my_baseline.rds")
+
+fit_new <- gdpar(
+  formula       = y ~ x1 + x2,
+  family        = gdpar_family("gaussian"),
+  amm           = spec,
+  data          = df,
+  iter_warmup   = golden$n_warmup,
+  iter_sampling = golden$n_sampling,
+  chains        = golden$n_chains,
+  refresh       = 0L,
+  verbose       = FALSE,
+  seed          = golden$seed
+)
+
+snap_new <- gdpar_snapshot_fit(fit_new)
+cmp <- gdpar_golden_compare(snap_new, golden, k_sigma = 3)
+cmp$passed
+cmp$by_layer
+if (!cmp$passed) print(cmp$failures, row.names = FALSE)
+```
+
+The `passed` field is `TRUE` only when every layer is clean. The `by_layer` field reports the count of failures per layer (`structural`, `discrete`, `continuous`, `sanity`). The `failures` data.frame has one row per failed item with columns:
+
+| Column | Meaning |
+|---|---|
+| `layer` | One of `structural`, `discrete`, `continuous`, `sanity`. |
+| `item` | Field or variable that failed (e.g., `"p"`, `"n_divergent"`, `"theta_ref:theta_ref[1]"`, `"rhat_max"`). |
+| `expected` | Compact string representation of the golden value. |
+| `observed` | Compact string representation of the observed value. |
+| `delta` | Numeric difference where applicable (`observed - expected`). |
+| `threshold` | Numeric threshold used by the layer (only continuous and sanity). |
+| `severity` | Currently always `"fail"`; reserved for future severity levels. |
+
+The compact string formatter (`format_compact()`, internal) is the same used by all four layer comparators, so failure rows are visually consistent across layers.
+
+---
+
+# **4. Tuning `k_sigma` and `sanity_floor`**
+
+## **4.1. `k_sigma`: sensitivity of layer C**
+
+The default `k_sigma = 3` corresponds to a one-sided $z$ of 3, roughly the 99.87 % upper quantile of a standard normal. Tighten when the project requires sub-MC-SE drift detection:
+
+```r
+cmp <- gdpar_golden_compare(snap_new, golden, k_sigma = 2)
+```
+
+Loosen when the golden was produced at too-low ESS:
+
+```r
+cmp <- gdpar_golden_compare(snap_new, golden, k_sigma = 5)
+```
+
+The recommended default lower bound is `k_sigma = 1.5`; below that, layer C effectively requires bit-exact agreement on continuous summaries, which is brittle under floating-point arithmetic. The recommended default upper bound is `k_sigma = 5`; above that, layer C ceases to detect regressions that matter. If `k_sigma = 5` is not enough, regenerate the golden with longer chains.
+
+## **4.2. `sanity_floor`: domain-specific absolute thresholds**
+
+The default sanity floor is intentionally permissive: `rhat_max <= 1.05` (rather than the stricter `1.01`), `ess_bulk_min >= 100` (rather than `400`), etc. The intent is to catch broken fits, not to enforce production-quality convergence.
+
+Tighten the floor for production goldens of long, well-converged fits:
+
+```r
+cmp <- gdpar_golden_compare(
+  snap_new, golden,
+  sanity_floor = list(
+    rhat_max = 1.01, ess_bulk_min = 400, ess_tail_min = 400,
+    divergent_pct = 0.001, ebfmi_min = 0.5
+  )
+)
+```
+
+The override is merged onto the defaults via `utils::modifyList()`, so partial specifications work:
+
+```r
+# Only tighten rhat, leave the rest at defaults.
+cmp <- gdpar_golden_compare(
+  snap_new, golden,
+  sanity_floor = list(rhat_max = 1.02)
+)
+```
+
+## **4.3. Combining `k_sigma` and `sanity_floor`**
+
+The two knobs are orthogonal. A common production configuration:
+
+```r
+cmp <- gdpar_golden_compare(
+  snap_new, golden,
+  k_sigma = 2,
+  sanity_floor = list(
+    rhat_max = 1.01, ess_bulk_min = 400, ess_tail_min = 400,
+    divergent_pct = 0, ebfmi_min = 0.5
+  )
+)
+```
+
+This refuses any divergence in the observed fit, demands $R\!-\!\hat{}$ within 1 %, and tolerates only two MC SE of drift in posterior means.
+
+---
+
+# **5. Integration with `testthat`**
+
+The package ships its own env-gated regression tests in `tests/testthat/test-golden_regression.R` against the three smoke fits in `inst/benchmarks/golden/` (`smoke_p2_auto`, `smoke_p2_cp`, `smoke_p2_ncp`). The pattern is straightforward:
+
+```{r testthat-illustrative, eval=FALSE}
+test_that("my_baseline regression", {
+  testthat::skip_if(Sys.getenv("MY_REGRESSION_CHECK") != "1",
+                    "Set MY_REGRESSION_CHECK=1 to run the regression.")
+  testthat::skip_if_not_installed("cmdstanr")
+
+  golden <- readRDS(
+    system.file("regression", "golden_my_baseline.rds",
+                package = "my_pkg")
+  )
+  df <- build_my_data(seed = golden$seed, n = golden$n)
+  fit <- my_fit_wrapper(df, golden)
+  snap <- gdpar_snapshot_fit(fit)
+  cmp  <- gdpar_golden_compare(snap, golden, k_sigma = 3)
+
+  fail_info <- if (!cmp$passed) {
+    paste0(
+      "\nFailures by layer: ",
+      paste(names(cmp$by_layer), cmp$by_layer, sep = "=",
+            collapse = ", "),
+      "\nFailure rows:\n",
+      paste(utils::capture.output(print(cmp$failures, row.names = FALSE)),
+            collapse = "\n")
+    )
+  } else ""
+
+  expect_true(cmp$passed, info = fail_info)
+})
+```
+
+The pattern is reproduced verbatim from the package's own tests; copy it for your downstream project and replace the data builder, the fit wrapper, and the env gate name.
+
+The env-gate is recommended because regression tests compile and sample Stan models and therefore take minutes per test. Keeping them out of the default `devtools::test()` flow preserves a fast development loop while making the regression suite available on demand for pre-release verification.
+
+---
+
+# **6. Workflow recommendations**
+
+- **Regenerate goldens after package or cmdstan bumps.** The schema is at `schema_version = 1L` until Bloque 8 lands; treat every minor bump of `gdpar` or `cmdstanr` as a reason to regenerate. The provenance fields persisted alongside the snapshot make this easy to audit.
+- **Commit goldens to the repository.** The `.rds` files are small (typically tens of kilobytes for short fits, hundreds for production fits). Committing them keeps the regression test self-contained; CI can run the env-gated tests on a dedicated job.
+- **Run the regression tests on a separate CI job from the unit tests.** The env-gated nature already implements this contract, but the typical CI configuration needs an explicit job that sets the env gate and depends on a job that compiles cmdstan once.
+- **Use the `parametrization_resolved` field for failure forensics.** When a regression test fails with discrete or continuous diffs only, check whether the resolved CP/NCP changed (e.g., the pre-flight made a different decision because the data changed slightly). The structural layer typically catches this when the per-coordinate flags shift, but the audit field makes the diagnosis explicit.
+- **Pin the `parametrization` argument when locking a golden.** Use `parametrization = "cp"` or `"ncp"` explicitly when building goldens for tests that must be deterministic across pre-flight reruns. The default `"auto"` is appropriate for production but introduces an extra source of variability that complicates regression debugging.
+
+---
+
+# **7. Known limitations**
+
+## **7.1. Experimental status**
+
+Both `gdpar_snapshot_fit()` and `gdpar_golden_compare()` are flagged `@keywords experimental` in their Roxygen. The schema version is at `1L`. Future Blocks 6-9 may add fields (e.g., per-coordinate posterior summaries for $W$, leave-one-out information criteria, PSIS-LOO diagnostics) and bump the schema with a documented migration. Until the first stable release, treat the contract as version-tied and re-generate goldens after every minor package bump.
+
+## **7.2. Stan implementation drift**
+
+The bit-exact comparison on `n_leapfrog_total_per_chain` (layer B) is tied to a specific cmdstan version. NUTS retuning across cmdstan versions can change the leapfrog count for the same seed and data without affecting the posterior. When upgrading cmdstan, regenerate the goldens; if regeneration is not viable, the recommended migration is to move `n_leapfrog_total_per_chain` from bit-exact (layer B) to relative tolerance (e.g., 5 %), not to loosen the rule globally.
+
+## **7.3. RNG seed semantics across hardware**
+
+The package does not currently snapshot the RNG implementation. In principle, the same `seed` could produce different draws on platforms whose RNG implementations differ at the floating-point level. In practice, R 4.6 + cmdstan 2.38 are reproducible across the supported platforms (Linux x86_64, macOS arm64) for the seeds tested in the package's own golden suite. Treat this as an empirical observation, not a contract.
+
+## **7.4. Layer C operates on posterior means only**
+
+The continuous layer compares `mean` per parameter element. Posterior `sd`, `ess_bulk`, `ess_tail`, and `rhat` are recorded in the snapshot for forensic use but are not directly compared (the sanity layer aggregates `rhat` and `ess` into floor checks). Adding per-element comparisons on `sd` or quantiles is straightforward but currently not done; if your application needs it, fork the comparator and add a layer-C extension.
+
+## **7.5. The structural layer is not exhaustive**
+
+Layer A compares a fixed set of structural fields chosen to detect the most common refactors (slot rename, column rename, class chain change, parametrisation slot rename). It does not introspect the contents of the `parametrization_resolved` field beyond recording the keys. New structural invariants that should be enforced after future API changes need to be added to `build_structural_snapshot_golden()` (internal helper) and to `golden_compare_structural()` together with a `schema_version` bump.
+
+---
+
+# **8. References and cross-references**
+
+- `vignette("vop02_arbitrary_p", package = "gdpar")` — multivariate cookbook, including Section 9 on the parametrisation-decision reporter (complementary quality assurance dimension).
+- `vignette("vop01_parametrization_toggle", package = "gdpar")` — scalar pre-flight diagnostic and reason codes.
+- `vignette("v01_amm_identifiability", package = "gdpar")` — canonical form and identifiability theory.
+- `?gdpar_snapshot_fit`, `?gdpar_golden_compare`.
+
+- Vehtari, A., Gelman, A., Simpson, D., Carpenter, B., and Bürkner, P.-C. (2021). Rank-normalization, folding, and localization: An improved $\widehat{R}$ for assessing convergence of MCMC. *Bayesian Analysis*, 16(2), 667-718. (Definition of bulk ESS, tail ESS, and the principled $\widehat{R}$ used by the sanity floor.)
+- Geyer, C. J. (1992). Practical Markov chain Monte Carlo. *Statistical Science*, 7(4), 473-483. (Monte Carlo standard error of the posterior mean estimator under autocorrelated chains.)
+- Stan Development Team (2024). *Stan Reference Manual*, version 2.35, Section "MCMC Sampling, NUTS algorithm". <https://mc-stan.org/docs/reference-manual/>

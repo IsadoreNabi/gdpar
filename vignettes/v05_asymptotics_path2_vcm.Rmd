@@ -1,0 +1,399 @@
+---
+title: "**Theoretical Addendum -- Block 5:**"
+subtitle: "Asymptotic Theory for Path 2 (Varying-Coefficient via Penalized Splines)"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{Asymptotic Theory for Path 2 (Varying-Coefficient via Penalized Splines)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+---
+
+# **1. Purpose**
+
+Block 4 developed the asymptotic theory of Path 1 (hierarchical Bayesian estimation via Stan). This block develops the parallel theory for **Path 2 (varying-coefficient models via penalized splines, implemented in `mgcv`)**, organized in three layers analogous to those of Block 4 but adapted to the frequentist penalized-spline setting:
+
+- **(L1) Pointwise consistency**: $\widehat{\beta}(z) \xrightarrow{P} \beta_*(z)$ at each fixed $z$.
+- **(L2) Uniform consistency and convergence rate**: $\sup_z |\widehat{\beta}(z) - \beta_*(z)| \to 0$ at a rate $r_n$ depending on smoothness, dimension, and penalty.
+- **(L3) Pointwise asymptotic normality**: $r_n^{-1}(\widehat{\beta}(z) - \beta_*(z) - \text{bias}(z)) \xrightarrow{d} \mathcal{N}(0, V(z))$.
+
+The reference framework throughout is **Stone (1985)** for the optimal nonparametric rate, **Fan and Zhang (2008)** for varying-coefficient asymptotics, **Wood (2017)** for the practical penalized-spline implementation, and **Hansen (2008)** for uniform rates of kernel estimators (a sibling result for splines under analogous regularity).
+
+Path 2 has no direct Bernstein-von Mises analog (BvM is Bayesian); its (L3) layer is the classical pointwise CLT for the spline estimator. We treat (L3) as the frequentist equivalent of Theorem 4C of Block 4, with the same caveats about scope (pointwise, not uniform; on the parametric component, not on the function class as a whole).
+
+The block specializes (REG-EST) of Block 2 to Path 2: under the hypotheses of Theorem 5A (or 5B), (REG-EST) holds in the average-error form Lemma 2B requires.
+
+> **Implementation status (`gdpar 0.0.0.9001`).** Path 2 (varying-coefficient via `mgcv`) is **not currently implemented** in the package. A call to `gdpar(..., path = "vcm")` aborts with a `gdpar_unsupported_feature_error` (see `R/gdpar.R`). The asymptotic theory developed below is canonical and reference-grade for the framework; the implementation notes in §11 are written in prospective voice ("the planned implementation will...") because the operational layer is queued for a future version of `gdpar` and the present block does not assume its availability.
+
+---
+
+# **2. Setting and Notation**
+
+## **2.1. The Path 2 Model**
+
+Path 2 fits an AMM Level 1 or Level 2 model in which the deviation function components are realized as **smooth functions estimated by penalized splines**:
+
+- **Standard VCM (Theorem 3.4 of Block 3, AMM Level 1):**
+$$Y_i = X_i^\top \beta(z_i) + \varepsilon_i, \qquad \beta(\cdot) \in \mathcal{F}_a \subset \text{(smooth function space)},$$
+where $\beta(z_i) = \theta_{\text{ref}} + a(z_i - \bar z)$ with $a$ in a finite-dim spline space.
+
+- **Reference-modulated VCM (Theorem 3.5 of Block 3, AMM Level 2 with $b \equiv 0$):**
+$$\beta(z_i, \theta_{\text{ref}}) = \theta_{\text{ref}} + a(z_i - \bar z) + W(\theta_{\text{ref}}) (z_i - \bar z),$$
+with $a$ and $W$ both in finite-dim spline spaces, $W$ orthogonal to the linear-in-$z$ subspace per the construction in Block 3 §7.
+
+The estimator is the penalized least-squares minimizer:
+$$\widehat{\eta} \;=\; \mathop{\arg\min}_{\eta \in \mathcal{F}_a \times \mathcal{F}_W} \;\sum_{i=1}^n (y_i - X_i^\top \beta_\eta(z_i))^2 \;+\; \lambda \, \mathcal{P}(\eta),$$
+where $\mathcal{P}$ is a roughness penalty (typically a quadratic form on the spline coefficients controlling second-derivative integrals) and $\lambda \geq 0$ is a smoothing parameter selected by REML or generalized cross-validation (Wood 2017).
+
+## **2.1.1. Two design regimes (parallel to Block 4)**
+
+The asymptotic conclusions are stated under one of two design regimes, made explicit:
+
+**(R-RANDOM) Random design.** The pairs $(X_1, z_1), \ldots, (X_n, z_n)$ are i.i.d. samples from a **joint distribution $\mu_{X, Z}$** on $\mathcal{X} \times \mathcal{Z}$ with $\mathcal{Z} \subset \mathbb{R}^q$. **No independence between $X$ and $z$ is assumed**: in typical applications the modifier $z$ is itself a function of, or correlated with, the predictor covariates $X$, and the joint distribution captures this dependence. We denote the marginal of $z$ by $\mu_z$ (which always exists as a marginal of $\mu_{X, Z}$) and the conditional density (when it exists) by $f(X \mid z)$.
+
+Asymptotic statements are in $P_{\eta_*}$-probability over the joint sample $\{(X_i, z_i, Y_i)\}_{i=1}^n$.
+
+**(R-COND) Fixed/conditional design.** The $\{(X_i, z_i)\}_{i=1}^n$ are treated as fixed; asymptotic statements are made conditional on the observed design for $\mu_{X, Z}^\infty$-a.e. realization.
+
+The (R-EQUIV) bridge condition of Block 4 §2.1.1 applies, with the same caveats: equivalence is automatic for finite-dim parametric components and holds under standard uniform-class conditions for the spline classes used in Path 2.
+
+We state Theorems 5A, 5B, 5C below under (R-RANDOM) by default with explicit (R-COND) variants; the choice of regime affects the precise form of the variance constant in (L3) but not the rate or the form of the limit.
+
+## **2.2. Vector vs. Scalar Convention for $\beta(\cdot)$**
+
+Throughout this block, **$\beta(z) \in \mathbb{R}^p$ is a vector function** (since the model is $X^\top \beta(z)$ with $X, \beta(z) \in \mathbb{R}^p$). Its $j$-th coordinate is denoted $\beta_j(z)$.
+
+Theorems below are stated in **vector form** using the Euclidean norm $\|\cdot\| = \|\cdot\|_2$ on $\mathbb{R}^p$, with the understanding that they specialize to **componentwise statements** by reading them coordinate by coordinate: e.g., Theorem 5A's $\widehat{\beta}(z) \xrightarrow{P} \beta_*(z)$ means $\widehat{\beta}_j(z) \xrightarrow{P} \beta_{*, j}(z)$ for each $j = 1, \ldots, p$.
+
+For the pointwise CLT (Theorem 5C), the limiting distribution is **multivariate Gaussian on $\mathbb{R}^p$** with a $p \times p$ asymptotic covariance matrix $V(z)$, capturing the joint asymptotic behavior of the coordinates of $\widehat{\beta}(z)$.
+
+## **2.3. Distance on the Parameter Space**
+
+For Path 2, the natural distances are direct rather than via Hellinger:
+
+- **Pointwise**: $d_z(\widehat{\beta}, \beta_*) := \|\widehat{\beta}(z) - \beta_*(z)\|$ at fixed $z$, with $\|\cdot\|$ the Euclidean norm on $\mathbb{R}^p$.
+- **Uniform (sup-norm)**: $d_\infty(\widehat{\beta}, \beta_*) := \sup_{z \in \mathcal{Z}} \|\widehat{\beta}(z) - \beta_*(z)\|$.
+- **$L^2(\mu_z)$**: $d_{L^2}(\widehat{\beta}, \beta_*) := \bigl(\int \|\widehat{\beta}(z) - \beta_*(z)\|^2 d\mu_z(z)\bigr)^{1/2}$.
+
+The three are related as $d_z \leq d_\infty$ and $d_{L^2} \leq d_\infty$, but no global equivalence holds: for non-parametric $\beta$, the sup-norm rate is typically slower than the pointwise rate by a $\sqrt{\log n}$ factor (Stone 1985; Hansen 2008).
+
+## **2.3. Notation Summary**
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $\beta(\cdot)$ | True varying-coefficient function |
+| $\widehat{\beta}(\cdot)$ | Penalized-spline estimator |
+| $\beta_*(\cdot)$ | True coefficient at $\eta_*$ |
+| $\mathcal{F}_a$ | Spline space for $a$ |
+| $J_n$ | Number of basis functions (knots), possibly growing in $n$ |
+| $\lambda$ | Smoothing parameter |
+| $\widehat{\lambda}$ | Data-driven smoothing parameter (REML, GCV) |
+| $\mathcal{P}$ | Roughness penalty on spline coefficients |
+| $\beta$ (**SMOOTH**) | Hölder/Sobolev smoothness exponent of true $\beta(\cdot)$ |
+| $r_n$ | Rate of convergence (depends on AMM Level, $\beta$, $J_n$) |
+
+To avoid confusion between the smoothness exponent $\beta$ and the coefficient function $\beta(\cdot)$, we write **$\beta$-Sobolev** when referring to the smoothness class and $\beta(\cdot)$ when referring to the function.
+
+---
+
+# **3. Three Asymptotic Layers**
+
+Parallel to Block 4:
+
+- **(L1) Pointwise consistency.** $\widehat{\beta}(z) \xrightarrow{P} \beta_*(z)$ at each $z$ in the support of $\mu_z$.
+- **(L2) Uniform consistency and rate.** $\sup_z |\widehat{\beta}(z) - \beta_*(z)| = O_P(r_n)$ for some $r_n \to 0$.
+- **(L3) Pointwise CLT.** $r_n^{-1}(\widehat{\beta}(z) - \beta_*(z) - \text{bias}(z)) \xrightarrow{d} \mathcal{N}(0, V(z))$ at each $z$ where the design is regular.
+
+The three layers are progressively stronger; each requires its own hypotheses, collected next.
+
+---
+
+# **4. Standing Asymptotic Hypotheses for Path 2**
+
+**(DESIGN-2) Design conditions on $z$.** $\mu_z$ admits a continuous density $f_z(\cdot)$ on $\mathcal{Z}$ that is bounded above and **bounded away from zero** on the interior of $\mathcal{Z}$. The covariate $X$ has $\mathrm{Cov}(X)$ full rank.
+
+(DESIGN-2) is the standard non-degenerate-design condition; the bounded-from-zero requirement on $f_z$ is what guarantees that splines are estimable everywhere in the interior. At boundaries, additional care is needed (Stone 1985 gives boundary-corrected rates).
+
+**(KNOT) Knot placement and number.** The spline space $\mathcal{F}_a$ has $J = J_n$ basis functions placed on a regular grid (or quantile-based grid) of the support $\mathcal{Z}$. As $n \to \infty$, $J_n \to \infty$ at rate $J_n \asymp n^{1/(2\beta + d)}$ for $\beta$-Sobolev smooth $\beta_*$ in dimension $d = \dim(z)$.
+
+The choice $J_n \asymp n^{1/(2\beta + d)}$ is **optimal** under (KNOT)+(SMOOTH) for the integrated $L^2$ rate (Stone 1985); it is the rate that balances bias (which decreases with $J_n$) and variance (which increases with $J_n$).
+
+**(SMOOTH) Smoothness of true $\beta(\cdot)$.** The true coefficient function $\beta_* \in \mathcal{H}^\beta(\mathcal{Z})$, the Sobolev (or Hölder) class of smoothness $\beta > d/2$ on $\mathcal{Z}$.
+
+The condition $\beta > d/2$ is needed for Sobolev embedding into continuous functions. If $\beta_*$ is less smooth than this, the rates degrade.
+
+**(PEN) Penalty regularity.** The roughness penalty $\mathcal{P}$ is a quadratic form $\mathcal{P}(\eta) = \eta^\top \Omega \eta$ with $\Omega$ symmetric positive semi-definite, $\mathrm{rank}(\Omega) = J_n - q^*$ where $q^*$ is the dimension of the null space (typically $q^* = q$, the polynomial space of degree below the penalty order).
+
+**(LAMBDA) Smoothing parameter rate.** Either (LAMBDA-FIXED): $\lambda$ is a fixed constant; or (LAMBDA-DATA): $\widehat{\lambda}$ is selected by REML or GCV with $\widehat{\lambda} \asymp n^{-2\beta/(2\beta+d)} \cdot J_n^{-(2\beta+d)/(2\beta+d) - \text{const}}$ (the rate consistent with the Stone-optimal balance under (KNOT)+(SMOOTH)).
+
+(LAMBDA-DATA) is the version actually used in `mgcv`: $\widehat{\lambda}$ is data-driven, and the rate above is achieved by REML in expectation (Wood, Pya, Säfken 2016) under standard regularity.
+
+---
+
+# **5. Theorem 5A: Pointwise Consistency**
+
+> **Theorem 5A. Stated under (R-RANDOM).** Suppose:
+>
+> - (DESIGN-2), (SMOOTH), (KNOT), (PEN), and either (LAMBDA-FIXED) with $\lambda \to 0$ at rate $\lambda \asymp n^{-1} J_n$, or (LAMBDA-DATA) with REML/GCV selection.
+> - The hypotheses of Theorem 1A of Block 1 hold for the AMM Level 1 (or 2) model being fit (in particular (LIN), (D-ID), and orthogonal-class construction for Level 2).
+>
+> Then for each $z$ in the interior of $\mathcal{Z}$, **componentwise** (equivalently in vector norm $\|\cdot\|$):
+> $$\widehat{\beta}(z) \;\xrightarrow{P}\; \beta_*(z) \quad \text{in } \mathbb{R}^p.$$
+>
+> **(R-COND) variant.** Conditioning on $\{(X_i, z_i)\}_{i=1}^n$, the same conclusion holds for $\mu_{X, Z}^\infty$-a.e. realization of the design.
+
+*Proof sketch.* This is a specialization of Stone (1985, Theorem 1) and Fan and Zhang (2008, §3.1) to the AMM Level 1/2 context. The argument decomposes the error into bias and variance:
+
+- **Bias bound.** Under (SMOOTH) and (KNOT), the spline approximation error satisfies $|\Pi_{\mathcal{F}_a} \beta_*(z) - \beta_*(z)| = O(J_n^{-\beta/d})$. With $J_n \asymp n^{1/(2\beta + d)}$, this is $O(n^{-\beta/(2\beta+d)})$.
+- **Variance bound.** Under (DESIGN-2), the variance of $\widehat{\beta}(z)$ at fixed $z$ is $O(J_n / n) = O(n^{-2\beta/(2\beta+d)})$.
+
+Combining, $\widehat{\beta}(z) - \beta_*(z) = O_P(n^{-\beta/(2\beta+d)})$, which goes to zero. $\square$
+
+**Specialization to (REG-EST) of Block 2.** Theorem 5A implies (REG-EST) of Block 2 for Path 2 in the average-error form. The argument follows the same three steps as Block 4 §5:
+
+(i) Pointwise consistency of $\widehat{\beta}(z)$ at every $z$ in the interior of $\mathrm{supp}(\mu_z)$.
+
+(ii) The map $\eta \mapsto \theta_{\text{ref}} + \Delta(z, \theta_{\text{ref}})$ for fixed $z$ is continuous in $\eta$ under (LIN) and (DESIGN-2). Pointwise consistency of $\widehat{\beta}$ implies pointwise consistency of the fitted $\widehat{\theta}_i = \widehat{\beta}(z_i)$ (because $\widehat{\theta}_i$ is a deterministic function of $\widehat{\beta}$).
+
+(iii) Averaging over the empirical distribution of $z_{1:n}$ via (IID) and uniform integrability gives $n^{-1} \sum_i |\widehat{\theta}_i - \theta_*(x_i, \theta_{\text{ref}})| \to 0$ in probability, which is (REG-EST).
+
+---
+
+# **6. Theorem 5B: Uniform Consistency and Rate**
+
+> **Theorem 5B. Stated under (R-RANDOM).** Under the hypotheses of Theorem 5A:
+>
+> $$\sup_{z \in \mathcal{Z}_0} \bigl\| \widehat{\beta}(z) - \beta_*(z) \bigr\| \;=\; O_P\bigl(r_n\bigr),$$
+>
+> where $\|\cdot\|$ is the Euclidean norm on $\mathbb{R}^p$, $\mathcal{Z}_0$ is any compact subset of the interior of $\mathcal{Z}$, and the rate is
+> $$r_n \;=\; n^{-\beta/(2\beta+d)} \cdot \sqrt{\log n}.$$
+>
+> Equivalently, **componentwise**, $\sup_{z \in \mathcal{Z}_0} |\widehat{\beta}_j(z) - \beta_{*, j}(z)| = O_P(r_n)$ for each $j = 1, \ldots, p$.
+>
+> **(R-COND) variant.** Conditioning on $\{(X_i, z_i)\}_{i=1}^n$, the same uniform rate holds for $\mu_{X, Z}^\infty$-a.e. realization of the design.
+
+*Proof sketch.* Hansen (2008) gives the uniform rate $n^{-\beta/(2\beta+d)} \cdot \sqrt{\log n}$ for kernel estimators under (DESIGN-2) and (SMOOTH); the analog for splines under (KNOT)+(PEN) is in Stone (1985) and refined by de Boor (2001) and Wood (2017). The $\sqrt{\log n}$ factor is the cost of moving from pointwise to uniform via union bound on a fine grid of $z$-values. $\square$
+
+**The uniform rate is strictly slower than the pointwise rate by $\sqrt{\log n}$** (no global equivalence between the two metrics, parallel to the $d_H$ vs. $d_{L^2}$ situation of Block 4).
+
+**Boundary behavior.** Near $\partial \mathcal{Z}$, the spline estimator has higher variance and larger bias due to the asymmetric design. Boundary-corrected estimators (P-splines with appropriate corrections; Wood 2017 §5.4) achieve the same $r_n$ rate up to the boundary. In `mgcv`, this is automatic for default basis choices.
+
+---
+
+# **7. Theorem 5C: Pointwise Asymptotic Normality**
+
+> **Theorem 5C. Stated under (R-RANDOM).** Suppose the hypotheses of Theorem 5A hold and additionally:
+>
+> - The error $\varepsilon_i$ has mean zero and variance $\sigma^2 < \infty$.
+> - The design is sufficiently regular at $z$ for a CLT to apply (formally: $f_z(z) > 0$, $\beta_*$ is twice differentiable in a neighborhood of $z$).
+> - The penalty parameter is chosen at the rate (LAMBDA-DATA) or (LAMBDA-FIXED) with $\lambda \to 0$ but $n \lambda \to \infty$.
+>
+> Then for each fixed $z$ in the interior of $\mathcal{Z}$, the **vector-valued estimator** $\widehat{\beta}(z) \in \mathbb{R}^p$ satisfies a **multivariate CLT**:
+> $$\sqrt{n / J_n} \cdot \bigl(\widehat{\beta}(z) - \beta_*(z) - \mathrm{bias}_n(z)\bigr) \;\xrightarrow{d}\; \mathcal{N}_p\bigl(0,\; V(z)\bigr),$$
+>
+> where $\mathrm{bias}_n(z) \in \mathbb{R}^p$ has $\|\mathrm{bias}_n(z)\| = O(J_n^{-\beta/d}) = O(n^{-\beta/(2\beta+d)})$, and **$V(z) \in \mathbb{R}^{p \times p}$ is the asymptotic covariance matrix derived from the spline estimator at $z$**, a positive-definite matrix depending on the design density $f_z(z)$, the conditional design $f(X \mid z)$, the error variance $\sigma^2$, the basis $\mathcal{F}_a$, and the penalty $\mathcal{P}$.
+>
+> **(R-COND) variant.** Conditioning on $\{(X_i, z_i)\}_{i=1}^n$, the conditional CLT holds with $V(z)$ replaced by the conditional asymptotic covariance, which converges to $V(z)$ for $\mu_{X, Z}^\infty$-a.e. realization of the design under (R-EQUIV) and standard uniform-class conditions.
+
+*Proof sketch.* This is the standard CLT for spline (or kernel) estimators; see Fan and Zhang (2008, Theorem 3.2) for the VCM context and Wahba (1983) for spline-specific results. The argument uses Lyapunov's CLT applied to the spline coefficient estimates and translates the result to the function value at $z$ via continuous mapping. $\square$
+
+**On the explicit form of $V(z)$ (and why it is left generic here).** Under the **equivalent-kernel representation** (Silverman 1984; Eubank 1999), the spline estimator $\widehat{\beta}(z)$ admits a Nadaraya-Watson-like representation $\widehat{\beta}(z) = \sum_i K^*(z, z_i) y_i$ with an equivalent kernel $K^*$ determined by the basis and penalty, leading to a closed-form $V(z)$ depending on $f_z(z)$, $f(X \mid z)$, $\sigma^2$, and $\int K^*(z, \cdot)^2 \, d\mu_z$. This closed form is **specific to the equivalent-kernel approximation** and the particular spline-penalty choice. The framework reports $V(z)$ via the **standard `mgcv` covariance estimator** (which uses the Hessian of the penalized log-likelihood; Wood 2017 §6.10) without committing to a particular closed-form expression, both because the Hessian-based estimator is the practical object the user observes and because the closed-form equivalent-kernel expression introduces approximation error that is not always favorable in finite samples.
+
+## **7.1. Scope of (L3): Explicit and Tight**
+
+> **The CLT of Theorem 5C is pointwise, at each fixed $z$.** It is **not** uniform: confidence bands constructed pointwise from Theorem 5C are **not** valid simultaneously across all $z$ at the nominal level; valid uniform bands require Bonferroni correction or uniform-band methods (Wahba 1983 for the Bayesian-credible uniform band; Krivobokova, Kneib, Claeskens 2010 for frequentist uniform confidence bands under penalized splines).
+
+The pointwise/uniform distinction parallels Block 4's parametric/non-parametric BvM distinction: Theorem 5C gives valid pointwise CLT (analogous to Theorem 4C for the parametric subset); valid uniform inference is a strictly stronger claim with separate hypotheses (analogous to the open question for non-parametric BvM in Block 4 §9).
+
+---
+
+# **8. Proposition 5D: Adaptive Smoothing under Data-Driven $\widehat{\lambda}$**
+
+> **Proposition 5D.** Suppose the hypotheses of Theorem 5A hold with (LAMBDA-DATA): $\widehat{\lambda}$ selected by REML or GCV. Suppose additionally that the smoothness $\beta$ of $\beta_*$ is **unknown** but satisfies $\beta > d/2$. Then under the regularity conditions of the cited literature (Wood, Pya, Säfken 2016 for REML; Wahba 1985 for GCV), $\widehat{\lambda}$ **typically adapts** to the unknown smoothness and achieves rates that, in the cases treated by that literature, **match or are close to the Stone-optimal rate** $n^{-\beta/(2\beta+d)}$ for the resulting estimator $\widehat{\beta}(z; \widehat{\lambda})$.
+
+*Argument outline.* REML for spline penalty selection corresponds to maximizing a marginal likelihood that, under the spline-smoothing equivalence with Bayesian Gaussian-process priors (Kimeldorf and Wahba 1970), is closely tied to the optimal posterior contraction rate. Wood, Pya, and Säfken (2016) establish the asymptotic behavior of $\widehat{\lambda}$ under standard regularity; GCV achieves a comparable rate under additional conditions (Wahba 1985). The **adaptivity is generally good in practice**, but the precise rate depends on:
+
+- the true smoothness class of $\beta_*$ (e.g., Sobolev vs. Hölder; isotropic vs. anisotropic);
+- the basis choice in $\mathcal{F}_a$ (B-spline, thin-plate, tensor-product);
+- the form of the penalty $\mathcal{P}$ (curvature penalty, ridge component, etc.);
+- the design density $f_z$ (uniform-like vs. concentrated);
+- the noise distribution of $\varepsilon_i$.
+
+**The framework does not claim universal adaptivity** ---only that REML/GCV adaptivity is a well-supported heuristic in the cases covered by the cited literature, and that empirical verification of the achieved rate (§11.1 below) is part of the standard reporting.
+
+**Caveat: post-selection inference is delicate.** Confidence intervals from Theorem 5C constructed using $\widehat{\lambda}$ in place of $\lambda$ have **approximate** rather than exact coverage in finite samples: the variability of $\widehat{\lambda}$ contributes additional uncertainty not captured by the standard formula for $V(z)$. Krivobokova, Kneib, and Claeskens (2010) and Wood, Pya, Säfken (2016, §4) give corrections; these are implemented in `mgcv` via the `freq` and `Bayesian` confidence interval options. Reported credible/confidence intervals in `gdpar` Path 2 carry an explicit note that they are post-selection.
+
+---
+
+# **9. Specialization to Block 3 Special Cases**
+
+| Special Case | AMM Level | Theorem 5A applies? | Pointwise rate | Uniform rate | CLT (5C) |
+|:-------------|:---------:|:-------------------:|:---------------:|:-------------:|:--------:|
+| Hierarchical with covariate REs (Theorem 3.2) | 1 | ✓ trivially (parametric) | $n^{-1/2}$ | $n^{-1/2}$ | ✓ standard |
+| Hastie-Tibshirani VCM (Theorem 3.4) | 1 | ✓ | $n^{-\beta/(2\beta+d)}$ | $n^{-\beta/(2\beta+d)} \sqrt{\log n}$ | ✓ pointwise |
+| Reference-modulated VCM (Theorem 3.5) | 2, $b \equiv 0$ | ✓ under orthogonal-class construction | Same as 3.4 for $a$; analogous for $W$ | Same | ✓ pointwise |
+| Hierarchical Bayesian + multiplicative (Theorem 3.6) | 2, $W \equiv 0$ | Path 1 (not Path 2) | --- | --- | --- |
+
+Path 2 covers the cases involving smooth varying coefficients (3.4, 3.5). Cases 3.2 (purely parametric) reduce to the standard $n^{-1/2}$ rate of OLS, which Path 2 recovers as a special case with no penalty needed. Case 3.6 with multiplicative $b$ is naturally handled in Path 1 (Bayesian) because $b$ is not a smooth function of a separate modifier $z$ but a pointwise multiplicative interaction.
+
+---
+
+# **10. Open Questions**
+
+**(O1-Path2) Uniform inference under data-driven $\widehat{\lambda}$.** Confidence bands valid uniformly across $z$ post-selection of $\widehat{\lambda}$ are an active research area. Krivobokova-Kneib-Claeskens (2010) give partial results under specific penalty structures; the general case for arbitrary AMM Level 2 with non-trivial $W(\theta_{\text{ref}})$ remains open. The framework's current default reports pointwise CIs with a clear note that simultaneous coverage requires additional adjustment.
+
+**(O2-Path2) CLT for non-Hölder smoothness classes.** Theorem 5C requires $\beta > d/2$ (Sobolev embedding into continuous functions). For coefficient functions with $\beta \leq d/2$ (rough functions), the pointwise CLT may not hold and convergence rates are slower; the framework applies $L^2$-rate results from Stone (1985) but does not establish a CLT. Identifying the CLT-valid class for non-smooth $\beta$ is open.
+
+**(O3-Path2) Joint CLT across multiple $z$ and across components.** Theorem 5C is pointwise. Joint CLT for $(\widehat{\beta}(z_1), \widehat{\beta}(z_2))$ at two distinct $z$ values (joint inference on functional values) and joint CLT across the AMM components $a$ and $W$ (joint inference on multiple smooth functions) require additional regularity not stated here. Standard arguments give the joint CLT under regular design and bounded support; rigorous verification across all special cases of Block 3 is an exercise but not a proven theorem of this block.
+
+**(O4-Path2) Identifiability of orthogonal-class construction in finite samples.** The orthogonal-class construction of Block 3 §7 (Theorem 3.5) is asymptotically clean but in finite samples, the projection $(\mathrm{Id} - \Pi_{\text{lin}})$ has empirical noise. The interaction between this projection error and the spline-fitting error is not fully characterized; the practical effect is small in typical samples but a theoretical bound is open.
+
+---
+
+# **11. Implementation Implications for Path 2 (mgcv)**
+
+The planned Path 2 implementation in `gdpar` will call `mgcv::gam` (or `gamm` for GLMM-style fits) under the hood, exposing the AMM structure through the framework's function-class interface. The current release (`0.0.0.9001`) does not ship this path; the design notes below specify the contract the operational layer will honour when it lands.
+
+### **11.1. Smoothing Parameter Selection**
+
+By default, planned `gdpar` Path 2 fits will use REML for $\widehat{\lambda}$ selection (Wood, Pya, Säfken 2016 corrected REML), which achieves the optimal rate of Proposition 5D under standard regularity. GCV will be available as an option for problems where REML is computationally expensive.
+
+The planned library will report both the chosen $\widehat{\lambda}$ and a diagnostic on the rate of $\widehat{\lambda}$ across re-fits with subsamples; substantial deviation from the Stone-optimal rate will be flagged as either prior misspecification or true smoothness lower than $d/2$ (in which case the rate is slower than predicted).
+
+### **11.2. Confidence Interval Reporting**
+
+The planned library will report two types of CIs by default:
+
+- **Pointwise CIs from Theorem 5C**: standard $\sqrt{n/J_n}$ CIs with the bias term explicitly subtracted and reported. Valid pointwise.
+- **Bayesian CIs from `mgcv`'s frequentist-Bayesian equivalence**: CIs derived from the Bayesian posterior interpretation of the penalized estimator (Kimeldorf-Wahba 1970; Wahba 1983), valid under stronger conditions on the prior matching the smoothness.
+
+The planned library will **not** report "uniform CIs" by default because their validity post-selection of $\widehat{\lambda}$ is the open question (O1-Path2); the planned user interface will allow requesting uniform Bonferroni-corrected bands or invoking specialized routines (Krivobokova-Kneib-Claeskens 2010 implementation) when needed.
+
+### **11.3. (REG-EST) of Block 2 Specialized to Path 2**
+
+Theorem 5A (with $r_n = n^{-\beta/(2\beta+d)}$ rate) implies (REG-EST) for Path 2 in the average-error form via the same three-step argument as Block 4 §5: pointwise consistency of $\widehat{\beta}(z)$, continuity of the AMM map under (LIN), averaging via (IID).
+
+The strictly stronger uniform-in-$i$ version of (REG-EST) requires Theorem 5B (uniform consistency at rate $n^{-\beta/(2\beta+d)} \sqrt{\log n}$); this is available for Path 2 but is not invoked by Lemma 2B's average-error form.
+
+---
+
+# **12. Summary**
+
+This block has established for Path 2:
+
+1. **Three asymptotic layers** ---pointwise consistency (5A), uniform consistency and rate (5B), pointwise CLT (5C)--- parallel to those of Block 4 for Path 1.
+
+2. **Standing asymptotic hypotheses** for Path 2: (DESIGN-2), (SMOOTH), (KNOT), (PEN), (LAMBDA-FIXED) or (LAMBDA-DATA), each named and formally stated.
+
+3. **Theorem 5A (Pointwise Consistency)** at the Stone-optimal rate $n^{-\beta/(2\beta+d)}$, with explicit (R-RANDOM)/(R-COND) variants and bridge to (REG-EST) of Block 2.
+
+4. **Theorem 5B (Uniform Consistency)** at rate $n^{-\beta/(2\beta+d)} \sqrt{\log n}$, with the $\sqrt{\log n}$ factor explicitly noted as the cost of moving from pointwise to uniform.
+
+5. **Theorem 5C (Pointwise CLT)** with explicit scope: pointwise valid only; uniform inference is the subject of (O1-Path2).
+
+6. **Proposition 5D (Adaptive Smoothing)** under data-driven $\widehat{\lambda}$ via REML/GCV, with the caveat that post-selection inference requires correction.
+
+7. **Specialization to Block 3 special cases** with a tabular summary of which Path 2 cases are covered and at what rate.
+
+8. **Four explicitly recognized open questions** specific to Path 2 (uniform post-selection inference, CLT for non-smooth $\beta$, joint CLT, finite-sample orthogonal-class identifiability).
+
+9. **Implementation diagnostics** for Path 2 via `mgcv`, including dual CI reporting (pointwise frequentist + Bayesian credible) and (REG-EST) verification.
+
+The block does not claim to close the open questions; it specializes existing nonparametric-spline asymptotic results to AMM and recognizes the open questions explicitly where they appear.
+
+---
+
+# **13. Connections to Subsequent Blocks**
+
+- **Block 6** (Asymptotics for Path 3, hypernetwork) treats the partial results available for neural-network-based estimation, with explicit recognition of the open questions in BvM and contraction rate for the hypernetwork case.
+- **Block 7** (Empirical Bayes vs. Fully Bayes) interacts with this block via the spline-Bayesian equivalence (Kimeldorf-Wahba 1970): Path 2 with REML is asymptotically equivalent to a particular Bayesian fit with Gaussian-process prior, providing a bridge between Paths 1 and 2.
+- **Block 8** (CATE/ITE positioning) places Path 2's varying-coefficient estimator in the context of heterogeneous treatment effect estimators (BART; causal forests; X-, R-learner), which are related but use distinct asymptotic frameworks.
+
+---
+
+# **Appendix A. Asymptotic Notation for Path 2**
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $\beta(z) \in \mathbb{R}^p$ | Vector-valued varying coefficient function |
+| $\beta_j(z)$ | $j$-th coordinate of $\beta(z)$ |
+| $\widehat{\beta}(\cdot)$ | Vector-valued penalized-spline estimator |
+| $\beta_*(\cdot)$ | True coefficient function at $\eta_*$ |
+| $\|\cdot\|$ | Euclidean norm on $\mathbb{R}^p$ |
+| $\mu_{X, Z}$ | Joint distribution of $(X, Z)$ on $\mathcal{X} \times \mathcal{Z}$ |
+| $\mu_z$ | Marginal of $z$ derived from $\mu_{X, Z}$ |
+| $f_z, f(X \mid z)$ | Marginal and conditional densities under $\mu_{X, Z}$ |
+| $J_n$ | Number of basis functions in $\mathcal{F}_a$, possibly growing |
+| $\lambda, \widehat{\lambda}$ | Smoothing parameter (fixed / data-driven) |
+| $\mathcal{P}, \Omega$ | Roughness penalty (form / matrix) |
+| $r_n = n^{-\beta/(2\beta+d)}$ | Stone-optimal pointwise rate |
+| $r_n \sqrt{\log n}$ | Uniform rate |
+| $\beta$ | Smoothness exponent (Sobolev/Hölder) |
+| $d = \dim(z)$ | Dimension of modifier covariate |
+| $V(z) \in \mathbb{R}^{p \times p}$ | Pointwise asymptotic covariance matrix (Theorem 5C) |
+| $\mathrm{bias}_n(z) \in \mathbb{R}^p$ | Spline approximation bias at $z$ |
+| $K^*$ | Equivalent kernel of spline estimator (interpretive remark only) |
+
+---
+
+# **Appendix B. Asymptotic Hypothesis Table for Path 2**
+
+| Hypothesis | Content | Used by |
+|:-----------|:--------|:--------|
+| (R-RANDOM) | Random design: $(X_i, z_i) \overset{\text{iid}}{\sim} \mu_{X, Z}$ (joint, no independence between $X$ and $z$) | Default for §5-7 |
+| (R-COND) | Fixed/conditional design: posterior/inference conditional on observed $\{(X_i, z_i)\}$ | Variant for §5-7 |
+| (DESIGN-2) | $f_z$ continuous, bounded above and away from zero on interior of $\mathcal{Z}$; $\mathrm{Cov}(X)$ full rank | Theorems 5A, 5B, 5C |
+| (KNOT) | $J_n$ knots placed regularly with $J_n \asymp n^{1/(2\beta+d)}$ | Theorems 5A, 5B, 5C |
+| (SMOOTH) | $\beta_* \in \mathcal{H}^\beta(\mathcal{Z})$ Sobolev/Hölder of smoothness $\beta > d/2$ | Theorems 5A, 5B, 5C |
+| (PEN) | Quadratic penalty $\mathcal{P}(\eta) = \eta^\top \Omega \eta$ with $\Omega \succeq 0$ | Theorems 5A, 5B, 5C |
+| (LAMBDA-FIXED) | $\lambda$ fixed with $\lambda \to 0$, $n\lambda \to \infty$ | Theorems 5A, 5B, 5C |
+| (LAMBDA-DATA) | $\widehat{\lambda}$ via REML/GCV | Proposition 5D |
+
+---
+
+# **References Cited in This Block**
+
+de Boor, C. (2001). *A Practical Guide to Splines*, rev. ed. Springer.
+
+Eubank, R. L. (1999). *Nonparametric Regression and Spline Smoothing*, 2nd ed. Marcel Dekker.
+
+Fan, J., and Zhang, W. (2008). Statistical methods with varying coefficient models. *Statistics and Its Interface*, 1(1), 179--195.
+
+Hansen, B. E. (2008). Uniform convergence rates for kernel estimation with dependent data. *Econometric Theory*, 24(3), 726--748.
+
+Kimeldorf, G. S., and Wahba, G. (1970). A correspondence between Bayesian estimation on stochastic processes and smoothing by splines. *Annals of Mathematical Statistics*, 41(2), 495--502.
+
+Krivobokova, T., Kneib, T., and Claeskens, G. (2010). Simultaneous confidence bands for penalized spline estimators. *Journal of the American Statistical Association*, 105(490), 852--863.
+
+Silverman, B. W. (1984). Spline smoothing: The equivalent variable kernel method. *Annals of Statistics*, 12(3), 898--916.
+
+Stone, C. J. (1985). Additive regression and other nonparametric models. *Annals of Statistics*, 13(2), 689--705.
+
+Wahba, G. (1983). Bayesian "confidence intervals" for the cross-validated smoothing spline. *Journal of the Royal Statistical Society, Series B*, 45(1), 133--150.
+
+Wahba, G. (1985). A comparison of GCV and GML for choosing the smoothing parameter in the generalized spline smoothing problem. *Annals of Statistics*, 13(4), 1378--1402.
+
+Wood, S. N. (2017). *Generalized Additive Models: An Introduction with R*, 2nd ed. Chapman and Hall/CRC.
+
+Wood, S. N., Pya, N., and Säfken, B. (2016). Smoothing parameter and model selection for general smooth models. *Journal of the American Statistical Association*, 111(516), 1548--1563.

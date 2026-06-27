@@ -1,0 +1,1007 @@
+---
+title: "**Theoretical Addendum -- Block 1:**"
+subtitle: "The AMM Canonical Form and Identifiability Conditions"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{The AMM Canonical Form and Identifiability Conditions}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+---
+
+# **1. Purpose**
+
+The framework introduced in the overview vignette specifies that individual parameters $\theta_i$ are decomposed as
+
+$$\theta_i \;=\; \theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}}).$$
+
+Two foundational questions remain. First, what functional form does $\Delta$ take? Second, when are the components $(\theta_{\text{ref}}, \Delta)$ recoverable from data?
+
+This block addresses both questions with explicit separation of three logical layers, mixed in many treatments and easy to conflate:
+
+- **Algebraic-functional identifiability**: when does the latent function $\theta_i(\cdot)$ uniquely determine the underlying components $(\theta_{\text{ref}}, a, b, W)$?
+- **Statistical identifiability**: when do the observable data $\{(x_i, y_i)\}$ uniquely determine those components?
+- **Numerical verifiability**: when, in a chosen finite parametric representation, does an empirical diagnostic detect identifiability or its failure?
+
+The first layer is settled by Theorem 1A under a clearly stated linearity hypothesis on the function classes. The second layer is bridged by Lemma 1B, which makes explicit the requirement that the response distribution family be itself identifiable in its parameter. The third layer is captured by Proposition 1C, which connects identifiability *in a chosen finite basis* to non-singularity of an empirical Gram matrix. Approximation, the Bayesian extension, and the hypernetwork case are treated in further results, each with its own hypotheses and its own scope.
+
+The treatment is for an applied statistician. Each formal statement is preceded by a non-technical paragraph that explains its content in plain language; each proof step is followed by a paragraph that interprets what the step achieves.
+
+---
+
+# **2. Setting and Notation**
+
+We work with $n$ observational units indexed by $i = 1, \ldots, n$. Each unit has:
+
+- a vector of covariates $x_i \in \mathcal{X} \subseteq \mathbb{R}^d$, drawn i.i.d. from a population distribution $\mu$;
+- a vector of individual model parameters $\theta_i \in \mathbb{R}^p$, latent;
+- an outcome $y_i$ drawn from a response distribution $\mathcal{D}(\theta_i)$.
+
+The framework specifies $\theta_i = \theta_{\text{ref}} + \Delta(x_i, \theta_{\text{ref}})$, where $\theta_{\text{ref}} \in \Theta \subseteq \mathbb{R}^p$ is the population reference and $\Delta : \mathcal{X} \times \Theta \to \mathbb{R}^p$ is the deviation function.
+
+| Symbol | Domain | Meaning |
+|:-------|:-------|:--------|
+| $x_i$ | $\mathbb{R}^d$ | Individual covariates (centered; see (C1) below) |
+| $\theta_i$ | $\mathbb{R}^p$ | Individual parameter vector |
+| $\theta_{\text{ref}}$ | $\Theta \subseteq \mathbb{R}^p$ | Population reference parameter |
+| $\theta_0$ | $\Theta$ | Anchor point of $W$ (typically $\theta_0 = \theta_{\text{ref}}$) |
+| $\theta_*$ | $\Theta$ | True value of $\theta_{\text{ref}}$ in identifiability arguments |
+| $\Delta(x, \theta)$ | $\mathbb{R}^p$ | Deviation function |
+| $\mathcal{D}(\theta)$ | --- | Response distribution given $\theta$ |
+| $\mu$ | --- | Marginal distribution of $X$ in the population |
+| $\pi_\Theta$ | --- | Prior on $\theta_{\text{ref}}$ in the Bayesian setting |
+| $\odot$ | --- | Hadamard (elementwise) product |
+| $\otimes$ | --- | Kronecker / tensor product |
+
+---
+
+# **3. The AMM Hierarchy: Stratifying the Space of Deviation Forms**
+
+The space of admissible deviation functions is infinite-dimensional. We stratify it into nested levels indexed by the joint polynomial order in $(x, \theta_{\text{ref}})$. Each level is a structurally distinct family of deviation functions, with its own expressive capacity and its own identifiability theorem.
+
+The hierarchy is constructive: lower levels are subfamilies of higher ones. Whether the union of all polynomial-restricted levels is dense in the space of regular deviation functions is the subject of the approximation scheme of Section 3.8 ---an approximation result, not a closed proposition, presented with explicit caveats.
+
+## **3.1. Level 0 -- Degenerate**
+
+$$\Delta(x, \theta_{\text{ref}}) \;=\; 0.$$
+
+All individuals share $\theta_i = \theta_{\text{ref}}$. No individuation; standard non-mixed regression. Joint order: $(0, 0)$.
+
+## **3.2. Level 1 -- Linear Additive**
+
+$$\Delta(x, \theta_{\text{ref}}) \;=\; A x,$$
+
+with $A \in \mathbb{R}^{p \times d}$ fixed and not depending on $\theta_{\text{ref}}$. This is the classical random-coefficient model and standard hierarchical model with covariates in random effects (Raudenbush and Bryk 2002). The framework's distinguishing feature ---reference-dependence of $\Delta$--- is absent. Joint order: $(1, 0)$.
+
+## **3.3. Level 2 -- Canonical AMM**
+
+$$\boxed{\;\Delta(x, \theta_{\text{ref}}) \;=\; \underbrace{a(x)}_{\text{additive}} \;+\; \underbrace{b(x) \odot \theta_{\text{ref}}}_{\text{multiplicative (Hadamard)}} \;+\; \underbrace{W(\theta_{\text{ref}})\, x}_{\text{modulated}}.\;}$$
+
+The components are:
+
+- $a : \mathcal{X} \to \mathbb{R}^p$ measurable.
+- $b : \mathcal{X} \to \mathbb{R}^p$ measurable.
+- $W : \Theta \to \mathbb{R}^{p \times d}$ continuous with $W(\theta_0) = 0$ at the anchor point.
+
+Each component captures a distinct interaction between individual covariates and the population reference:
+
+- **Additive** $a(x)$: the part of the deviation independent of where the reference sits in parameter space.
+- **Multiplicative** $b(x) \odot \theta_{\text{ref}}$: the part that scales coordinate-by-coordinate with the reference. If the reference doubles, this contribution doubles.
+- **Modulated** $W(\theta_{\text{ref}})\, x$: the linear-in-$x$ part whose coefficients are reshaped by the reference itself.
+
+Level 2 is the smallest level extending Level 1 in which $\Delta$ depends nontrivially on $\theta_{\text{ref}}$.
+
+## **3.4. Level 2.5 -- Full-Matrix Multiplicative**
+
+The Hadamard product is replaced by a full matrix:
+
+$$\Delta(x, \theta_{\text{ref}}) \;=\; a(x) \;+\; B(x)\, \theta_{\text{ref}} \;+\; W(\theta_{\text{ref}})\, x,$$
+
+with $B : \mathcal{X} \to \mathbb{R}^{p \times p}$. Level 2 is the special case $B(x) = \operatorname{diag}(b(x))$.
+
+## **3.5. Level 3 -- Quadratic Extensions**
+
+Adds quadratic interactions:
+
+$$\Delta(x, \theta_{\text{ref}}) \;=\; \Delta^{(2)}(x, \theta_{\text{ref}}) \;+\; \bigl[x^\top Q_k(\theta_{\text{ref}})\, x\bigr]_{k=1}^p \;+\; \bigl[\theta_{\text{ref}}^\top R_k(x)\, \theta_{\text{ref}}\bigr]_{k=1}^p \;+\; \theta_{\text{ref}} \odot W(\theta_{\text{ref}})\, x,$$
+
+with $\Delta^{(2)}$ the Level-2 part. The doubly-modulated term has joint order $(1, 2)$.
+
+## **3.6. Level $K$ -- Polynomial Closure**
+
+All polynomial-tensor terms up to total joint order $K$ in $(x, \theta_{\text{ref}})$:
+
+$$\Delta(x, \theta_{\text{ref}}) \;=\; \sum_{(j, k) : 1 \leq j + k \leq K,\, j \geq 1} \mathcal{T}_{j, k}\bigl(x^{\otimes j}, \theta_{\text{ref}}^{\otimes k}\bigr),$$
+
+with $\mathcal{T}_{j, k}$ multilinear of orders $(j, k)$. Terms with $j = 0$ are excluded as non-individuating (they would collapse into a redefinition of $\theta_{\text{ref}}$).
+
+## **3.7. Level $\infty$ -- Universal AMM**
+
+$$\Delta(x, \theta_{\text{ref}}) \;=\; \Phi(x, \theta_{\text{ref}}),$$
+
+with $\Phi : \mathcal{X} \times \Theta \to \mathbb{R}^p$ an arbitrary measurable function subject to centering constraints. Realized in practice by neural networks of sufficient capacity (hypernetworks). Identifiability at this level is treated separately as Proposition 1F.
+
+## **3.8. Approximation Scheme: From Polynomial AMM to Continuous Functions**
+
+The hierarchy of Sections 3.1-3.6 stratifies admissible deviation forms by joint polynomial order in $(x, \theta_{\text{ref}})$, but does **not** require the components $a, b, W$ themselves to be polynomial: Level 2 admits arbitrary measurable $a, b$ and arbitrary continuous $W$. The approximation result below applies to the **polynomial restriction** of the hierarchy, where $a, b, W$ are themselves polynomials. We state it precisely and flag its limits.
+
+> **Scheme 1D (Approximation by Polynomial AMM).** Let $\mathcal{X}, \Theta$ be compact subsets of $\mathbb{R}^d, \mathbb{R}^p$ respectively, and let $\Delta : \mathcal{X} \times \Theta \to \mathbb{R}^p$ be continuous. For every $\varepsilon > 0$ there exists a finite $K$ and a Level-$K$ deviation function $\Delta^{(K)}$ ---with all sub-functions $a, b, W$ themselves restricted to be polynomials of degree at most $K$ in their arguments--- such that
+$$\sup_{(x, \theta) \in \mathcal{X} \times \Theta} \bigl\|\Delta(x, \theta) - \Delta^{(K)}(x, \theta)\bigr\| < \varepsilon.$$
+
+*Argument.* By the Stone-Weierstrass theorem, real polynomials are uniformly dense in $C(\mathcal{X} \times \Theta, \mathbb{R})$. Approximating each coordinate of $\Delta$ by a polynomial of total degree $\leq K$ yields a Level-$K$ AMM in which the components $a, b, W$ are polynomial restrictions ---a strictly smaller subfamily than the general Level-$K$ that admits arbitrary measurable $a, b$ and arbitrary continuous $W$. The truncation error decreases monotonically as $K$ grows. $\square$
+
+**Caveats explicitly flagged.**
+
+(i) The scheme is an **approximation result**, not an identifiability theorem. Approximating $\Delta$ by $\Delta^{(K)}$ does not preserve identifiability: the components of $\Delta^{(K)}$ may differ substantially from those of $\Delta$ even when $\sup |\Delta - \Delta^{(K)}|$ is small.
+
+(ii) The scheme covers the **polynomial restriction** of Level-$K$ AMM, not the full Level-$K$ AMM with arbitrary measurable $a, b$ and continuous $W$. AMM with spline or kernel components, for instance, lies outside the polynomial restriction.
+
+(iii) The scheme requires **compactness** of $\mathcal{X}$ and $\Theta$. Without compactness, Stone-Weierstrass density does not apply.
+
+(iv) The error bound $\varepsilon$ is uniform over the compact domain but says nothing about the rate at which $K$ must grow. Practical truncation requires a separate analysis of the smoothness of $\Delta$.
+
+In summary: the hierarchy of polynomial-AMM levels is dense in the space of continuous deviation functions on compact domains, in the sense of uniform approximation. This is a useful fact for thinking about the framework's expressive capacity, but it is not a closed identifiability statement. The identifiability content of the block lives in results 1A-1F below (Theorem 1A, Lemma 1B, Proposition 1C, Scheme 1D, Theorem 1E, Proposition 1F).
+
+---
+
+# **4. Why Level 2 Is the Canonical Default**
+
+Level 0 and Level 1 do not realize the framework: in both, $\Delta$ does not depend on $\theta_{\text{ref}}$. Among the remaining levels, Level 2 has three properties that single it out as the canonical default:
+
+**(P1) Minimality of reference-dependence.** Level 2 is the smallest extension of Level 1 in which $\theta_{\text{ref}}$ enters $\Delta$ nontrivially.
+
+**(P2) Separability of components.** The three components $(a, b, W)$ correspond to three structurally distinct mechanisms with separate interpretations.
+
+**(P3) Computational tractability.** Level 2 admits closed-form gradients, finite-dimensional sufficient statistics, and tractable Hamiltonian Monte Carlo sampling under standard regularity.
+
+The identifiability theorem below is stated and proved for Level 2. Sections 7 and 8 sketch how it extends to higher levels and verifies that standard models in the literature fall within its scope.
+
+---
+
+# **5. Standing Assumptions**
+
+We collect the assumptions used by the identifiability results. All six are interpretable and verifiable on data.
+
+**(C1) Centering of covariates.** $\mathbb{E}_\mu[X] = 0$.
+
+**(C2) Functional centering of $a$.** $\mathbb{E}_\mu[a(X)] = 0$.
+
+**(C3) Functional centering of $b$.** $\mathbb{E}_\mu[b(X)] = 0$.
+
+**(C4) Anchoring of the modulating matrix.** There exists $\theta_0 \in \Theta$ with $W(\theta_0) = 0_{p \times d}$.
+
+**(C5) Support and integrability.** $\mathcal{X}$ is a Borel subset of $\mathbb{R}^d$ with $\mu(\mathcal{X}) = 1$; $\mathbb{E}_\mu[\|X\|^2] < \infty$; $\mathrm{Cov}_\mu(X)$ has full rank $d$; $a, b \in L^2(\mu, \mathbb{R}^p)$; $W$ is continuous on $\Theta$ with $\sup_{\theta \in \Theta} \|W(\theta)\|_F < \infty$.
+
+**(C6) Non-degeneracy of the reference.** The true population reference $\theta_*$ has all coordinates non-zero, equivalently $\theta_* \in \Theta^\circ := \{\theta \in \Theta : \theta_k \neq 0 \text{ for all } k = 1, \ldots, p\}$.
+
+**Joint consequence of (C1)-(C4)** (used throughout): the population-averaged deviation vanishes for every $\theta_{\text{ref}}$,
+
+$$\mathbb{E}_\mu[\Delta(X, \theta_{\text{ref}})] = \mathbb{E}[a(X)] + \mathbb{E}[b(X)] \odot \theta_{\text{ref}} + W(\theta_{\text{ref}}) \mathbb{E}[X] = 0.$$
+
+This is the **centering of the framework**.
+
+**(C6) is genuinely a non-trivial assumption.** When $\theta_*$ has a zero coordinate, the multiplicative component in that coordinate vanishes regardless of $b$, and identifiability of $b$ in that coordinate is lost. (C6) rules out this degeneracy. In practice, (C6) is satisfied for parameters that are bounded away from zero by their problem definition (rates, scales, precisions), and can be enforced by reparametrization (e.g., $\log \theta_{\text{ref}}$ for positive parameters).
+
+---
+
+# **6. Identifiability of Canonical AMM**
+
+## **6.1. Three Layers of Identifiability**
+
+The identifiability question separates into three logically distinct levels, each requiring its own hypotheses.
+
+**(L1) Algebraic-functional identifiability.** Given the latent function $\theta_i(\cdot)$ on $\mathrm{supp}(\mu)$, do its components $(\theta_{\text{ref}}, a, b, W)$ uniquely correspond to the function? This is a question about the algebraic structure of the AMM decomposition, independent of how data are generated.
+
+**(L2) Statistical identifiability.** Given the observable joint distribution of $(X_i, Y_i)$ ---not the latent $\theta_i$--- do the components uniquely correspond to the data-generating process? This bridges (L1) to data via the response distribution $\mathcal{D}(\theta)$.
+
+**(L3) Numerical verifiability.** Given a fitted model in a finite parametric representation, can a computational diagnostic flag identifiability failure? This translates abstract conditions into runtime checks.
+
+We treat each layer with its own theorem or proposition.
+
+## **6.2. The Functional Independence Condition**
+
+Two flavors of FIC are useful, distinguished by their scope.
+
+**Abstract FIC at $\theta_*$.** Let $\mathcal{F}_a, \mathcal{F}_b \subseteq L^2_0(\mu, \mathbb{R}^p)$ and $\mathcal{F}_W \subseteq C(\Theta, \mathbb{R}^{p \times d})$ be the function classes from which $a, b, W$ are drawn. Define the subspaces
+
+$$\mathcal{S}_a \;=\; \mathcal{F}_a, \qquad \mathcal{S}_b(\theta_*) \;=\; \bigl\{x \mapsto h(x) \odot \theta_* : h \in \mathcal{F}_b\bigr\}, \qquad \mathcal{S}_W \;=\; \bigl\{x \mapsto M\, x : M \in \mathbb{R}^{p \times d}\bigr\}.$$
+
+> **Abstract FIC at $\theta_*$.** The three subspaces $\mathcal{S}_a, \mathcal{S}_b(\theta_*), \mathcal{S}_W$ are linearly independent as subsets of $L^2(\mu, \mathbb{R}^p)$:
+$$f_a + f_b + f_W = 0 \;\;\text{(in } L^2\text{)} \;\Longrightarrow\; f_a = 0,\; f_b = 0,\; f_W = 0,$$
+for $f_a \in \mathcal{S}_a$, $f_b \in \mathcal{S}_b(\theta_*)$, $f_W \in \mathcal{S}_W$.
+
+**Basis-restricted FIC.** When $\mathcal{F}_a, \mathcal{F}_b$ are infinite-dimensional and only a finite truncation is parametrized in the implementation, FIC restricted to that truncation is a strictly weaker condition. Let $B = (B_a, B_b)$ be a finite basis with $B_a = \{\phi_j^{(a)}\}_{j=1}^{J_a}$ for $\mathcal{F}_a$ and $B_b = \{\phi_k^{(b)}\}_{k=1}^{J_b}$ for $\mathcal{F}_b$.
+
+> **Basis-restricted FIC ($\text{FIC}_B$) at $\theta_*$.** Abstract FIC restricted to functions expressible in the bases $B_a, B_b$ for the additive and multiplicative components, with $W(\theta_*)$ ranging over $\mathbb{R}^{p \times d}$.
+
+When $\mathcal{F}_a, \mathcal{F}_b$ are themselves finite-dimensional and $B$ exhausts them, $\text{FIC}_B$ coincides with abstract FIC. When $\mathcal{F}_a, \mathcal{F}_b$ are larger, $\text{FIC}_B$ is strictly weaker than abstract FIC.
+
+## **6.3. Theorem 1A: Algebraic-Functional Identifiability**
+
+This is the algebraic core of the block.
+
+> **Theorem 1A.** Suppose:
+>
+> - **(LIN)** $\mathcal{F}_a, \mathcal{F}_b$ are finite-dimensional linear subspaces of $L^2_0(\mu, \mathbb{R}^p)$, and $\mathcal{F}_W$ is a finite-dimensional linear space of continuous matrix-valued functions on $\Theta$, all closed under addition.
+> - The standing assumptions (C1)-(C5) hold for every admissible decomposition.
+> - (C6) holds at the true population reference $\theta_*$.
+> - Abstract FIC at $\theta_*$ holds.
+>
+> Then the latent function
+> $$\theta_i^*(\cdot) \;=\; \theta_* + a(\cdot) + b(\cdot) \odot \theta_* + W(\theta_*) \cdot,$$
+> as an element of $L^2(\mu, \mathbb{R}^p)$, uniquely determines $(\theta_*, a, b, W(\theta_*))$ within $\Theta \times \mathcal{F}_a \times \mathcal{F}_b \times \{W(\theta_*) : W \in \mathcal{F}_W\}$.
+
+**Scope of identification regarding $W$.** Theorem 1A identifies the **value** $W(\theta_*) \in \mathbb{R}^{p \times d}$ at the single point $\theta_*$. It does **not** identify $W$ as a function on $\Theta$: at any $\theta \neq \theta_*$, $W(\theta)$ remains unconstrained by the latent function evaluated at the single reference $\theta_*$. Functional identification of $W$ on a Bayesian prior support is the subject of Theorem 1E and rests on additional hypotheses (continuity of $W$, connectedness of the prior support).
+
+**Plain reading.** Under the explicit hypothesis that the function classes are linear subspaces (so that differences of admissible components remain in the class), and under the explicit assumption that no coordinate of the true reference is zero, the latent function $\theta_i^*(\cdot)$ contains all the information needed to recover the four components $(\theta_*, a, b, W(\theta_*))$ uniquely ---with $W$ pinned only at the single point $\theta_*$. The proof proceeds in three steps with conceptual commentary at each.
+
+### **6.3.1. Proof of Theorem 1A**
+
+Suppose two tuples $(\theta_*, a, b, W)$ and $(\theta_*', a', b', W')$, both admissible under (LIN) and the standing assumptions, produce the same latent function in $L^2(\mu, \mathbb{R}^p)$:
+
+$$\theta_* + a(x) + b(x) \odot \theta_* + W(\theta_*) x \;=\; \theta_*' + a'(x) + b'(x) \odot \theta_*' + W'(\theta_*') x \qquad (\mu\text{-a.s.}). \tag{$\ast$}$$
+
+We must show $\theta_* = \theta_*'$, $a = a'$ in $L^2(\mu)$, $b = b'$ in $L^2(\mu)$, and $W(\theta_*) = W'(\theta_*')$.
+
+#### **Step 1: Marginal expectation identifies $\theta_*$.**
+
+Take expectation of both sides of $(\ast)$ with respect to $X \sim \mu$. The two representations coincide $\mu$-a.s., so their expectations coincide. Using (C2), (C3), and (C1) ---each providing a zero substitution---:
+
+$$\mathbb{E}\bigl[\theta_* + a(X) + b(X) \odot \theta_* + W(\theta_*) X\bigr] \;=\; \theta_* + 0 + 0 + 0 \;=\; \theta_*.$$
+
+By the same argument the right-hand-side expectation equals $\theta_*'$. Hence $\theta_* = \theta_*' =: \theta_*$.
+
+**Conceptual commentary on Step 1.** This is the workhorse. Centering forces $\theta_{\text{ref}}$ to coincide with the marginal mean of $\theta_i(X)$. Two tuples producing the same latent function thus must share the same $\theta_{\text{ref}}$. Without (C1)-(C4) this step fails and translation non-identifiability persists.
+
+#### **Step 2: Subtract the common reference and form differences.**
+
+With $\theta_* = \theta_*'$, equation $(\ast)$ simplifies. Subtracting the common $\theta_*$ from both sides:
+
+$$a(x) + b(x) \odot \theta_* + W(\theta_*) x \;=\; a'(x) + b'(x) \odot \theta_* + W'(\theta_*) x \qquad (\mu\text{-a.s.}).$$
+
+Define
+
+$$\delta_a(x) \;=\; a(x) - a'(x), \qquad \delta_b(x) \;=\; b(x) - b'(x), \qquad \delta_W \;=\; W(\theta_*) - W'(\theta_*).$$
+
+By (LIN), the linear subspaces are closed under subtraction: $\delta_a \in \mathcal{F}_a$, $\delta_b \in \mathcal{F}_b$, and $\delta_W \in \mathbb{R}^{p \times d}$. The constraint becomes
+
+$$\delta_a(x) + \delta_b(x) \odot \theta_* + \delta_W \, x \;=\; 0 \qquad (\mu\text{-a.s.}). \tag{$\diamond$}$$
+
+**Conceptual commentary on Step 2.** The differences $\delta_a, \delta_b, \delta_W$ measure disagreement between the two competing decompositions. Equation $(\diamond)$ states that, when measured along the direction in which the latent function is observed, all three differences must sum to zero. The next step shows ---under FIC--- that each must be zero individually. The role of (LIN) here is essential: without linearity, $\delta_a = a - a'$ might not lie in $\mathcal{F}_a$, and the proof structure collapses.
+
+#### **Step 3: Abstract FIC at $\theta_*$ forces each difference to zero.**
+
+By Step 2, $\delta_a \in \mathcal{S}_a$, $\delta_b \odot \theta_* \in \mathcal{S}_b(\theta_*)$, and $\delta_W \cdot x \in \mathcal{S}_W$. Equation $(\diamond)$ says their sum is zero in $L^2(\mu, \mathbb{R}^p)$.
+
+Abstract FIC at $\theta_*$ (Section 6.2) says these three subspaces are linearly independent in $L^2(\mu, \mathbb{R}^p)$. The only way the sum can be zero is for each summand to be zero in $L^2$:
+
+$$\delta_a = 0,\qquad \delta_b \odot \theta_* = 0,\qquad \delta_W \, x = 0 \;\;\text{in } L^2(\mu, \mathbb{R}^p).$$
+
+The first equation gives $a = a'$ in $L^2(\mu)$. The second equation, together with (C6) (no coordinate of $\theta_*$ is zero), gives $\delta_b = 0$ in $L^2(\mu)$, hence $b = b'$ in $L^2(\mu)$. The third equation, together with (C5) ($\mathrm{Cov}_\mu(X)$ full rank, so $X$ spans $\mathbb{R}^d$ in $L^2$), gives $\delta_W = 0$, hence $W(\theta_*) = W'(\theta_*)$. $\square$
+
+**Conceptual commentary on Step 3.** FIC is the structural condition saying the three component spaces do not overlap. If they did, mass could be transferred between them while leaving the latent function unchanged ---exactly the non-identifiability we rule out. (C6) is needed in the second equation: without it, a zero coordinate of $\theta_*$ would make the multiplicative term vanish and $b$ would be unidentified in that coordinate.
+
+### **6.3.2. Necessity of FIC**
+
+A constructive converse to Theorem 1A holds, but only when the function class $\mathcal{F}_W$ is rich enough to realize arbitrary target values at the point $\theta_*$. This richness is not implied by (LIN) alone, and the necessity proof relies on it as a separate, **formal hypothesis** in addition to (LIN) and (C1)-(C6).
+
+> **(EVAL) Surjectivity of point evaluation at $\theta_*$.** The point-evaluation map
+> $$E_{\theta_*} \;:\; \mathcal{F}_W \;\longrightarrow\; \mathbb{R}^{p \times d}, \qquad W \;\longmapsto\; W(\theta_*),$$
+> is surjective onto $\mathbb{R}^{p \times d}$.
+
+(EVAL) is satisfied by the standard finite-dimensional choices of $\mathcal{F}_W$ encountered in implementations: matrix-valued polynomial spaces of degree $\geq 1$, matrix-valued spline spaces with sufficient knots, finite linear combinations of any basis spanning $\mathbb{R}^{p \times d}$ at $\theta_*$. It is **not** automatic from (LIN), which only requires $\mathcal{F}_W$ to be a finite-dimensional linear space, without constraining its image at any single point. The library checks (EVAL) at the chosen anchor before fitting and aborts with a diagnostic message if it fails.
+
+> **Proposition (Necessity of FIC).** Assume:
+>
+> - (LIN) and (C1)-(C6) hold.
+> - **(EVAL)** holds at $\theta_*$ as defined above.
+>
+> If Abstract FIC at $\theta_*$ fails, then the parametrization $(\theta_*, a, b, W(\theta_*)) \in \Theta \times \mathcal{F}_a \times \mathcal{F}_b \times \mathbb{R}^{p \times d}$ is not identifiable: there exist two distinct admissible tuples producing the same latent function.
+
+*Proof.* Failure of Abstract FIC means there exist $h_a \in \mathcal{F}_a$, $h_b \in \mathcal{F}_b$, and $H_W \in \mathbb{R}^{p \times d}$, not all zero, satisfying
+
+$$h_a(x) + h_b(x) \odot \theta_* + H_W \, x \;=\; 0 \;\;\text{in } L^2(\mu, \mathbb{R}^p).$$
+
+**By (EVAL)**, there exists $\Psi \in \mathcal{F}_W$ with $\Psi(\theta_*) = H_W$. Take any admissible $(\theta_*, a^*, b^*, W^*)$ and define $a' = a^* + h_a$, $b' = b^* + h_b$, $W' = W^* + \Psi$. By (LIN), the perturbed components remain in $\mathcal{F}_a, \mathcal{F}_b, \mathcal{F}_W$ respectively. By construction, $W'(\theta_*) = W^*(\theta_*) + H_W$. Centering conditions (C2)-(C3) hold for $a', b'$ because $\mathcal{F}_a, \mathcal{F}_b \subseteq L^2_0$. The latent function is unchanged because the perturbation $h_a(x) + h_b(x) \odot \theta_* + H_W \, x = 0$ cancels by the FIC failure equation. The two tuples differ at the level of $(a, b, W(\theta_*))$ but produce the same latent function. $\square$
+
+**Conceptual commentary on the necessity proof.** Two hypotheses are doing distinct work in the construction. **(LIN)** lets us add perturbations to admissible components and remain inside the function classes (closure under addition). **(EVAL)** lets us pick a specific target shift $H_W$ at the anchor point and realize it as the value of some $W \in \mathcal{F}_W$ (surjectivity of point evaluation). Without (LIN), $a' = a^* + h_a$ might fall outside $\mathcal{F}_a$. Without (EVAL), there might be no $W \in \mathcal{F}_W$ with the required value at $\theta_*$. Both are formal conditions, both are checkable in the chosen finite parametric representation, and both are satisfied by the standard choices used in practice.
+
+## **6.4. Lemma 1B: Statistical Bridge**
+
+Theorem 1A identifies the latent function $\theta_i(\cdot)$, which is not directly observed. The bridge to observable data requires a separate, explicit assumption on the response distribution.
+
+> **Lemma 1B.** Suppose:
+>
+> - The hypotheses of Theorem 1A hold.
+> - **(D-ID)** The response distribution family $\{\mathcal{D}(\theta) : \theta \in \mathbb{R}^p\}$ is identifiable in $\theta$: $\mathcal{D}(\theta) = \mathcal{D}(\theta')$ implies $\theta = \theta'$.
+>
+> Then the joint distribution of $(X_i, Y_i)$ uniquely determines $(\theta_*, a, b, W(\theta_*))$ within the parameter space of Theorem 1A.
+
+*Proof sketch.* Under (D-ID), the conditional law $\mathcal{L}(Y_i \mid X_i = x)$ uniquely determines $\theta_i(x)$ for $\mu$-a.e. $x$. Hence the latent function $\theta_i(\cdot)$ is identifiable from the joint distribution of $(X_i, Y_i)$. By Theorem 1A, the components are then identified. $\square$
+
+**When (D-ID) holds.**
+
+- **One-parameter exponential families with canonical link** (Normal with known variance, Poisson, Binomial with known $n$, Gamma with known shape): identifiable in the canonical parameter.
+- **Multi-parameter exponential families with full-rank natural parametrization** (e.g., Normal with unknown mean and variance): identifiable.
+- **Zero-inflated count distributions**: identifiable when the structural-zero probability $\pi$ and the count parameter $\theta$ vary independently in observable conditional distributions ---this can fail at boundary cases such as $\pi = 1$ (everyone is a structural zero, so $\theta$ vanishes from the likelihood). Identifiability of ZIP and ZINB is established in the literature (Lambert 1992; Greene 1994) under standard regularity.
+- **Mixture models in general**: identifiability is a delicate question dating back to Teicher (1963). Standard finite mixtures of distinct distributions are identifiable; degenerate cases (e.g., overlapping components) may not be.
+- **Copula-linked multivariate distributions**: identifiable when the marginal families and the copula family are jointly identifiable, requiring conditions on the copula parameters (Patton 2006).
+
+**(D-ID) is a hypothesis on the modelling setup, not a theorem of the framework.** When (D-ID) is in doubt, the user must verify it for the specific response distribution before relying on Lemma 1B.
+
+## **6.5. Corollary 1: Centering of the Framework**
+
+> **Corollary 1.** Under (C1)-(C4), $\mathbb{E}_\mu[\Delta(X, \theta_{\text{ref}})] = 0$ for every $\theta_{\text{ref}} \in \Theta$.
+
+*Proof.* Direct from the joint consequence of (C1)-(C4) noted in Section 5. $\square$
+
+**Plain reading.** When an individual is "average" (covariates equal the population mean), the deviation is zero: the parameter coincides with the population reference. The Anchoring Property posited in the overview vignette is here a theorem.
+
+## **6.6. Proposition 1C: Numerical Verifiability via the Gram Matrix**
+
+This proposition translates $\text{FIC}_B$ ---basis-restricted FIC--- into a runtime check. The translation is not equivalent to abstract FIC; it captures only what can be diagnosed within the chosen finite parametric representation.
+
+> **Proposition 1C.** Fix a finite basis $B = (B_a, B_b)$ for the additive and multiplicative components, with $B_a = \{\phi_j^{(a)}\}_{j=1}^{J_a}$ a basis of $\mathcal{F}_a$ and $B_b = \{\phi_k^{(b)}\}_{k=1}^{J_b}$ a basis of $\mathcal{F}_b$. Define the **extended design matrix** at $\theta_*$:
+> $$\mathbf{Z}_n(\theta_*) \;=\; \bigl[\, \Phi_a(X_{1:n}), \;\; \Phi_b(X_{1:n}) \odot \theta_*, \;\; X_{1:n} \,\bigr],$$
+> where $\Phi_a(X_{1:n})$ stacks the basis evaluations of $B_a$ over the $n$ rows, similarly $\Phi_b$, and $X_{1:n}$ stacks the centered covariates. The matrix $\mathbf{Z}_n(\theta_*)$ is a well-defined evaluation matrix in $\mathbb{R}^{n p \times (J_a + J_b + d)}$ as soon as the bases are fixed and the covariates are observed; no further hypotheses are required for its construction.
+>
+> Let $\mathbf{G}_n(\theta_*) = n^{-1} \mathbf{Z}_n(\theta_*)^\top \mathbf{Z}_n(\theta_*)$ be the empirical Gram matrix. As $n \to \infty$, $\mathbf{G}_n(\theta_*) \to \mathbf{G}(\theta_*)$ in probability, where $\mathbf{G}(\theta_*) = \mathbb{E}[\mathbf{Z}^\top \mathbf{Z}]$ is the population Gram matrix.
+>
+> Then, **for the chosen finite representation $B$**, $\text{FIC}_B$ at $\theta_*$ holds if and only if $\mathbf{G}(\theta_*)$ is non-singular.
+
+*Proof.* In the chosen finite representation $B$, $\text{FIC}_B$ at $\theta_*$ is by definition the linear independence of the columns of the (population) extended design matrix as elements of $L^2(\mu, \mathbb{R}^p)$. Linear independence of a finite collection in an inner-product space is equivalent to non-singularity of its Gram matrix. The equivalence is therefore an algebraic identity within the representation $B$, not a statement about $\mathcal{F}_a, \mathcal{F}_b, \mathcal{F}_W$ in their full abstract form. $\square$
+
+**Crucial caveats.**
+
+(i) Proposition 1C diagnoses **basis-restricted FIC**, not abstract FIC. If $\mathcal{F}_a, \mathcal{F}_b$ are infinite-dimensional and $B$ is a finite truncation, abstract FIC may fail in directions outside $B$'s span and $\mathbf{G}_n$ would not detect it.
+
+(ii) The empirical Gram matrix $\mathbf{G}_n$ approaches the population Gram matrix only as $n \to \infty$. In finite samples, near-singularity (high condition number) is a warning, not a definitive failure of $\text{FIC}_B$.
+
+(iii) Proposition 1C implies non-identifiability **within the basis $B$**. If $\mathbf{G}_n$ is singular, the model parameters in basis $B$ are not identifiable. The user can then either remove redundant basis functions or expand to a different basis.
+
+**Operational role.** Before fitting, the implementation computes the smallest eigenvalue and condition number of $\mathbf{G}_n(\theta_*)$ at the empirical mean of $\theta$ (initialized via a preliminary fit) or at a user-specified anchor. If the smallest eigenvalue falls below a tolerance (default $10^{-8}$), fitting is aborted with a diagnostic output identifying which basis directions are linearly dependent. This is a **necessary safeguard against basis-level non-identifiability**, not a guarantee of abstract identifiability.
+
+## **6.6.1. Condition C4-bis: Cross-Coordinate Identifiability for `p > 1`**
+
+The Gram-matrix check of Proposition 1C is sufficient for scalar reference parameters $\theta_{\text{ref}} \in \mathbb{R}$. When $\theta_{\text{ref}} \in \mathbb{R}^p$ with $p > 1$, the coord-wise factorization canonized in Phase F of Block 5.2 introduces a new failure mode that Proposition 1C cannot detect a priori: **cross-coordinate aliasing between the per-coordinate additive component $a_k$ and the shared modulating component $W$**. Condition C4-bis is the pre-fit structural guard against this failure mode, and the implementation backs it with a post-fit posterior-geometry diagnostic that the structural check cannot replace.
+
+### **6.6.1.1. The failure mode**
+
+For $p > 1$, the canonical AMM coordinate $k$ contributes to the linear predictor as
+
+$$\eta_{i,k} \;=\; \theta_{\text{ref}, k} \;+\; Z_{a,k}[i, \cdot] \, a_{\text{coef}, k} \;+\; \sum_{j=1}^{W_{\text{per\_k\_dim}}} \bigl(\theta_{\text{ref}, k}^{\,j} - \theta_{\text{anchor}, k}^{\,j}\bigr) \, W_{\text{raw}}[r_{k,j}, \cdot] \, X[i, \cdot]^\top + \cdots,$$
+
+where $Z_{a,k}$ is the per-coordinate additive design matrix (with column names listed in `design$Z_a_names_list[[k]]`) and $X$ is the shared modulating-component design matrix (with column names listed in `design$X_names`, equal to the `x_vars` of the spec).
+
+The cross-coordinate aliasing arises when $Z_{a,k}$ and $X$ share columns by name. Concretely: suppose a coordinate $k$ has `a_k = ~ x1` and the modulating component uses `x_vars = c("x1", "x2")`. Then the column $x_1$ appears both in $Z_{a,k}$ (as a basis function of $a_k$) and in $X$ (as a covariate of $W \cdot x$). A perturbation of the form
+
+$$a'_k(x) \;=\; a_k(x) + c \, x_1, \qquad W'_{k, x_1}(\theta) \;=\; W_{k, x_1}(\theta) - c / (\theta_k^1 - \theta_{\text{anchor}, k}^1)$$
+
+leaves $\eta_{i,k}$ invariant at the single value of $\theta_{\text{ref}, k}$ used to evaluate the diagnostic, but the two components $(a_k, W)$ are different. Posterior geometry detects this aliasing as a divergent funnel between the two components; the pre-fit check should detect the **structural overlap** that makes the aliasing possible in the first place.
+
+### **6.6.1.2. The condition**
+
+> **(C4-bis) Coord-wise structural disjointness.** For every coordinate $k = 1, \ldots, p$:
+> $$\mathrm{names}\bigl(Z_{a,k}\bigr) \,\cap\, \mathrm{names}(X) \;=\; \emptyset.$$
+
+Plain reading: at the column-name level, no covariate that enters the additive component of coordinate $k$ may also appear in the modulating component's `x_vars`. The condition is conservative: structural overlap is **necessary** for the cross-coordinate aliasing to occur, but not sufficient (regularization or specific data configurations may suppress the practical impact). The implementation defaults to flagging overlap as a failure (`rigor = "full"`) and offers a permissive mode (`rigor = "fast"`) that only emits a warning, intended for users who have explicitly accepted the overlap with informed regularization.
+
+### **6.6.1.3. Why the extended Gram matrix cannot detect C4-bis**
+
+A natural-looking alternative would be to extend the Gram matrix of Proposition 1C with the $W$-block columns $(\theta_{\text{ref}, k}^{\,j} - \theta_{\text{anchor}, k}^{\,j}) \cdot X$ for each $j = 1, \ldots, W_{\text{per\_k\_dim}}$ and check rank deficiency directly. This does not work as a pre-fit check, for two interlocking reasons:
+
+(a) **The $W$-block columns are scalar multiples of $X$ per coordinate $k$ at a fixed $\theta_{\text{ref}}$.** Because the diagnostic evaluates the basis at the single point $\theta_*$ (typically zero on the linear-predictor scale, possibly a small non-zero value if $b$ is active), the $W_{\text{per\_k\_dim}}$ columns per coordinate $k$ collapse to scalar multiples of the same $X$. The extended Gram matrix has rank $\dim(Z_{a,k}) + d$ (where $d = \dim(X)$), not $\dim(Z_{a,k}) + W_{\text{per\_k\_dim}} \cdot d$ as the algebraic check would naively expect. Rank deficit appears even when the components are perfectly identifiable, producing a **false positive**.
+
+(b) **A Jacobian-based check at $(a = 0, W = 0)$ inherits the same defect.** The information of $\theta_{\text{ref}}$ in $W \cdot x$ enters only through $W \neq 0$; evaluating the Jacobian at $W = 0$ erases the very signal the check is supposed to find. The defect is structural, not numerical.
+
+The implementation therefore separates the two checks:
+
+- **Pre-fit (C4-bis structural):** the rank of $Z_{a,k}$ alone (via its normalized Gram condition number) plus the column-name overlap with $X$. This is what `gdpar_check_identifiability()` does internally for $p > 1$ via the private helper `check_C4_bis_per_k()`.
+- **Post-fit (C4-bis posterior geometry):** divergent transitions, low ESS, high $\widehat{R}$ for the per-coordinate $a$ and $W$ blocks. This is the actual evidence of $\theta_{\text{ref}}$-mediated aliasing. The pre-fit check is necessary but not sufficient; the post-fit diagnostics are the conclusive forensic.
+
+### **6.6.1.4. The implementation: `rigor = "full"` vs `rigor = "fast"`**
+
+The check exposed by `gdpar_check_identifiability()` for $p > 1$ accepts an additional argument `rigor` with two values:
+
+```r
+gdpar_check_identifiability(amm = spec, data = df, rigor = "full")  # default
+gdpar_check_identifiability(amm = spec, data = df, rigor = "fast")
+```
+
+The `"full"` mode is the default. Per coordinate $k$:
+
+1. Compute the normalized Gram of $Z_{a,k}$ alone and check the condition number against `tol` (default $10^{-8}$). FAIL if rank-deficient.
+2. Compute the intersection of column names $\mathrm{names}(Z_{a,k}) \cap \mathrm{names}(X)$. FAIL if non-empty.
+3. Both conditions must pass for the coordinate to pass.
+
+The aggregated report's `passed` field is `TRUE` only when every coordinate passes. The aggregation is conservative by construction (any single per-coordinate failure flags the overall report).
+
+The `"fast"` mode runs the rank check but **does not** fail on structural overlap; it emits a single consolidated warning of class `gdpar_c4bis_overlap_warning` at the end of the loop with the full list of overlapping coordinates. This mode is intended for users who have explicitly accepted the overlap with informed regularization (e.g., a tightly-informative prior on the $W$ block of the overlapping covariate, or domain knowledge that the multiplicative interaction is the relevant signal).
+
+The full per-coordinate breakdown is stored in `report$c4_bis$per_k` and accessible via `print()` or direct subsetting. Each per-$k$ entry records `passed`, `lambda_min`, `lambda_max`, `condition_number`, `shared_cols`, and `collinear_directions`.
+
+### **6.6.1.5. Pedagogical example: overlap that fails (`rigor = "full"`)**
+
+A scenario with deliberate column-name overlap between the additive component of coordinate 1 and the modulating component's `x_vars`. The check correctly flags the structural overlap and aborts the fit.
+
+```{r c4bis-fail-illustrative, eval=FALSE}
+library(gdpar)
+
+set.seed(42L)
+df <- data.frame(x1 = rnorm(100L), x2 = rnorm(100L))
+df$y <- cbind(rnorm(100L), rnorm(100L))
+
+spec_overlap <- amm_spec(
+  p      = 2L,
+  dims   = dimwise(a = ~ x1 + x2),
+  W      = W_basis(type = "polynomial", degree = 2),
+  x_vars = c("x1", "x2")          # overlap: x1 and x2 appear in both a and W
+)
+
+# rigor = "full" (default): the check FAILS structurally before sampling.
+rep <- gdpar_check_identifiability(
+  amm = spec_overlap, data = df, rigor = "full"
+)
+rep$passed
+# [1] FALSE
+rep$c4_bis$per_k[[1L]]$shared_cols
+# [1] "x1" "x2"
+rep$c4_bis$per_k[[2L]]$shared_cols
+# [1] "x1" "x2"
+print(rep)
+# <gdpar_identifiability_report>
+#   passed             : FALSE
+#   ...
+#   C4-bis (per-coordinate cross-component):
+#     coord 1 (rigor=full) passed=FALSE cond=... shared_cols={x1,x2}
+#       ...
+#     coord 2 (rigor=full) passed=FALSE cond=... shared_cols={x1,x2}
+#       ...
+```
+
+When called inside `gdpar()` with `skip_id_check = FALSE` (the default), the failed check aborts the fit with class `gdpar_identifiability_error` and returns the report in the error data, so the user can inspect it programmatically:
+
+```{r c4bis-fail-gdpar-illustrative, eval=FALSE}
+fit <- tryCatch(
+  gdpar(y ~ x1 + x2, family = gdpar_family_multi("gaussian", p = 2L),
+        amm = spec_overlap, data = df),
+  gdpar_identifiability_error = function(e) e
+)
+# fit is the captured condition; fit$data$report has the same c4_bis breakdown.
+```
+
+### **6.6.1.6. Pedagogical example: coord-wise disjoint that passes**
+
+The remedy is straightforward: declare per-coordinate additive bases that are **disjoint** from the modulating component's `x_vars`. The two coordinates can use different covariates in $a_k$; the modulating component carries the cross-coordinate coupling without aliasing.
+
+```{r c4bis-pass-illustrative, eval=FALSE}
+df3 <- data.frame(
+  x1 = rnorm(100L),
+  x2 = rnorm(100L),
+  z1 = rnorm(100L),
+  z2 = rnorm(100L)
+)
+df3$y <- cbind(rnorm(100L), rnorm(100L))
+
+spec_disjoint <- amm_spec(
+  p      = 2L,
+  dims   = dimwise(a = NULL) |>
+             override(k = 1L, a = ~ z1) |>
+             override(k = 2L, a = ~ z2),
+  W      = W_basis(type = "polynomial", degree = 2),
+  x_vars = c("x1", "x2")          # disjoint from {z1, z2}
+)
+
+rep <- gdpar_check_identifiability(
+  amm = spec_disjoint, data = df3, rigor = "full"
+)
+rep$passed
+# [1] TRUE
+rep$c4_bis$per_k[[1L]]$shared_cols
+# character(0)
+rep$c4_bis$per_k[[2L]]$shared_cols
+# character(0)
+```
+
+The two coordinates of $a$ use distinct sets of covariates (`z1` for coord 1, `z2` for coord 2), and the modulating component uses different covariates entirely (`x1`, `x2`). There is no name-level overlap between $Z_{a,k}$ and $X$ for any coordinate, so C4-bis passes structurally and the fit proceeds.
+
+### **6.6.1.7. Worked design pattern: when overlap is unavoidable**
+
+In some applications the same covariate genuinely belongs to both the additive and the modulating part of the model (e.g., the covariate measures something whose direct effect on the parameter is structurally distinct from its modulating role through the reference). The recommended pattern in this case is:
+
+1. **First**, run `gdpar_check_identifiability(rigor = "full")` and confirm the structural overlap is the only failure (no rank deficit on $Z_{a,k}$ alone).
+2. **Second**, fit with `rigor = "fast"` to obtain the warning and proceed with the fit. The warning is a structured condition of class `gdpar_c4bis_overlap_warning` and can be captured programmatically:
+   ```r
+   fit <- gdpar(..., skip_id_check = FALSE,
+                # passes rigor = "fast" via internal default change;
+                # in practice users wanting "fast" call check_identifiability
+                # separately and then pass skip_id_check = TRUE to gdpar()
+                )
+   ```
+3. **Third**, place an informative prior on the $W$ block of the overlapping covariate (via `gdpar_prior()`) so that the modulating coefficient is anchored toward zero unless the data carry strong evidence otherwise. This regularization is what makes the overlap practically benign even when structurally present.
+4. **Fourth**, inspect the post-fit diagnostics: `fit$diagnostics$divergent_count`, `fit$diagnostics$rhat_max`, and the per-component ESS in `summary(fit)`. The pre-fit check cannot detect $\theta_{\text{ref}}$-mediated aliasing; the post-fit diagnostics can.
+
+The pattern is documented in the operational vignette `vignette("vop02_arbitrary_p", package = "gdpar")` Section 6 and in `vignette("vop01_parametrization_toggle", package = "gdpar")` Section 6.1 (the homologous discussion for the scalar path's confounding case).
+
+### **6.6.1.8. Summary**
+
+C4-bis is a pre-fit structural condition specific to $p > 1$: column-level disjointness between the per-coordinate additive design and the modulating-component covariates. The check is necessary but not sufficient; the post-fit posterior-geometry diagnostics (divergences, ESS, $\widehat{R}$) are the conclusive forensic for $\theta_{\text{ref}}$-mediated aliasing. The implementation defaults to the conservative `rigor = "full"` mode that aborts on overlap, and offers `rigor = "fast"` for the cases where overlap is genuinely intended and regularized.
+
+## **6.6.2. Condition C7: Anti-aliasing under per-group anchors (Block 6.5)**
+
+Block 6.5 promotes the scalar (or coord-wise) reference $\theta_{\text{ref}}$ to a per-group anchor $\theta_{\text{ref}}[g]$, $g = 1, \ldots, J_{\text{groups}}$, sampled hierarchically from $\mathrm{Normal}(\mu_{\theta_{\text{ref}}}, \sigma_{\theta_{\text{ref}}})$. The grouping is activated by the user via the one-sided formula argument `group` of `gdpar()` (for example `group = ~ species`). Default `group = NULL` reduces bit-exactly to the Block 6 single-anchor regime.
+
+The per-group anchor introduces a new structural failure mode that the Gram-matrix check of Section 6.6 (C1-C4) cannot detect, because that check operates on the centered design $(Z_a, Z_b \cdot \theta_{\text{ref}}, X)$ without conditioning on the group indicator. We isolate it as condition (C7) and the package enforces it pre-fit. The numbering follows the Block 6.5 sequence (C1-C6 are reserved for Block 1; see Appendix B); the symbol (C7) is distinct from the (C5) of Block 1 (Support and integrability) introduced in Section 5.
+
+### **6.6.2.1. The failure mode**
+
+If $Z_a$ (or $Z_b$) contains a column that is constant within every level of the grouping variable, that column is rank-deficient with the per-group dummy matrix $G = \mathbf{1}_{\{g = j\}}$, $j = 1, \ldots, J_{\text{groups}}$. The implied alias is:
+
+$$
+\theta_i \;=\; \theta_{\text{ref}}[g_i] + Z_a[i,\,]^{\top} a + \cdots
+\;=\; \theta_{\text{ref}}[g_i] + c \cdot \mathbf{1}_{g_i} + Z_a^{(-)}[i,\,]^{\top} a^{(-)} + \cdots,
+$$
+
+where $Z_a^{(-)}$ drops the aliased column and the constant $c$ associated to that column is absorbed into $\theta_{\text{ref}}[g_i]$. The model is point-non-identified along the ray $\theta_{\text{ref}}[g] \mapsto \theta_{\text{ref}}[g] + c$, $a \mapsto a - c \cdot e_{\text{column}}$, and HMC will exhibit divergences, low ESS, or chain-level drift.
+
+The same failure mode arises for any indirect alias: $\mathrm{rank}([G \mid Z_a]) < \mathrm{ncol}(G) + \mathrm{ncol}(Z_a)$, i.e. a non-trivial linear combination of $Z_a$ columns reproduces a column of $G$ even if no single column of $Z_a$ is constant within each group. The Gram-matrix check of Section 6.6 does not see this because it does not include $G$ in its block.
+
+### **6.6.2.2. The condition**
+
+> **Condition (C7).** When `use_groups = 1`, neither $Z_a$ nor $Z_b$ may contain columns that are rank-deficient with the per-group indicator matrix $G$. Equivalently, $\mathrm{rank}([G \mid Z_a]) = \mathrm{ncol}(G) + \mathrm{ncol}(Z_a)$ and likewise for $Z_b$.
+
+(C7) extends Section 6.6 of Block 1 with one extra check that is activated only when the user supplies `group`.
+
+### **6.6.2.3. Implementation**
+
+The pre-flight check `.check_group_aliasing_c7()` invoked by `gdpar()` runs two layers:
+
+1. **Constant-per-group detection.** For every column of $Z_a$ and $Z_b$, compute the within-group variance per level and flag columns where the maximum is below `tol`. This catches the direct alias `factor(group)` in `a` or `b`, as well as any deterministic function of `group`.
+2. **Joint QR rank check.** For the centered design block $Z$, form $[G \mid Z]$, normalize by column, and verify $\mathrm{rank}([G \mid Z]) = \mathrm{ncol}([G \mid Z])$ via `qr(M, tol = tol)`. This catches indirect aliases that the per-column check misses.
+
+A violation aborts with `gdpar_input_error`, naming the offending columns. The user must either remove the aliased columns from the AMM spec or fit without the `group` argument.
+
+Defense in depth: the standard Block 1 identifiability check `gdpar_check_identifiability()` runs before (C7) inside `gdpar()`, and frequently catches the direct `factor(group)` case (because $Z_a$ centered is rank-deficient even without conditioning on $G$). (C7) covers the residual subtler aliases that pass the Block 1 check.
+
+### **6.6.2.4. Pedagogical example: factor(group) in `a` fails (C7)**
+
+```{r c7_example_fails, eval=FALSE}
+set.seed(13L)
+n_per_group <- 20L; J <- 3L
+n <- n_per_group * J
+df <- data.frame(
+  x1 = rnorm(n),
+  group = factor(rep(letters[seq_len(J)], each = n_per_group))
+)
+df$y <- 0.4 * df$x1 +
+  rep(rnorm(J, sd = 1.5), each = n_per_group) +
+  rnorm(n, sd = 0.3)
+
+spec <- amm_spec(a = ~ x1 + group)
+fit <- gdpar(
+  formula = y ~ x1 + group,
+  amm     = spec,
+  data    = df,
+  group   = ~ group,
+  chains  = 1L, iter_warmup = 50L, iter_sampling = 50L,
+  refresh = 0L, verbose = FALSE
+)
+# Aborts with either:
+#   - gdpar_identifiability_error (Block 1 catches the direct rank-deficiency), or
+#   - gdpar_input_error (C7 catches the residual aliasing).
+```
+
+### **6.6.2.5. Worked design pattern: when a column is constant per group**
+
+```{r c7_example_const, eval=FALSE}
+set.seed(13L)
+n_per_group <- 20L; J <- 3L
+n <- n_per_group * J
+df <- data.frame(
+  x1    = rnorm(n),
+  group = factor(rep(letters[seq_len(J)], each = n_per_group))
+)
+# z_const is a deterministic function of group (constant per group):
+df$z_const <- as.numeric(df$group)
+df$y <- 0.4 * df$x1 +
+  rep(rnorm(J, sd = 1.5), each = n_per_group) +
+  rnorm(n, sd = 0.3)
+
+spec <- amm_spec(a = ~ x1, b = ~ z_const)
+fit <- gdpar(
+  formula = y ~ x1 + z_const,
+  amm     = spec,
+  data    = df,
+  group   = ~ group,
+  chains  = 1L, iter_warmup = 50L, iter_sampling = 50L,
+  refresh = 0L, verbose = FALSE
+)
+# Aborts with gdpar_input_error citing (C7) and naming the aliased column.
+# Remove z_const (or any deterministic function of group) from b, or
+# fit without the group argument.
+```
+
+### **6.6.2.6. Summary**
+
+(C7) is a single-layer extension of Block 1 specific to per-group anchors. The package enforces it pre-fit via `.check_group_aliasing_c7()`, complementing the Block 1 Gram-matrix check and the C4-bis cross-component check. Together they form a three-tier pre-flight: (C1-C4) global rank, (C4-bis) cross-component per coord, (C7) group-anchor anti-aliasing. The post-fit forensic remains the posterior-geometry diagnostic (divergences, ESS, $\widehat{R}$).
+
+## **6.7. Theorem 1E: Identifiability of $W$ on the Prior Support**
+
+In the Bayesian setting, $\theta_{\text{ref}}$ has a prior $\pi_\Theta$ over $\Theta$. Theorem 1A identifies $W$ at the single point $\theta_*$. **Outside the support of the prior, no data information about $W$ is accumulated**; identifiability of $W$ on $\Theta$ as a whole is therefore not the right question. The right question is identifiability on $\overline{\mathrm{supp}(\pi_\Theta)}$, the closure of the prior support. We state three tiers of identifiability, restricted to this set, with explicitly different hypotheses and explicitly different conclusions.
+
+> **Theorem 1E.** Suppose:
+>
+> - The hypotheses of Theorem 1A hold at $\pi_\Theta$-almost every $\theta_* \in \mathrm{supp}(\pi_\Theta)$ (in particular Abstract FIC holds $\pi_\Theta$-a.e.).
+> - The hypothesis (D-ID) of Lemma 1B holds.
+>
+> Let $W, W' \in \mathcal{F}_W$ be two candidates producing the same observable joint distribution of $(X, Y)$ for all admissible $\theta_{\text{ref}}$ in the prior support. Then:
+>
+> **(a) Identification $\pi_\Theta$-almost everywhere.** $W(\theta) = W'(\theta)$ for $\pi_\Theta$-a.e. $\theta \in \mathrm{supp}(\pi_\Theta)$.
+>
+> **(b) Identification in $L^2(\pi_\Theta)$.** $W$ and $W'$ are equal as elements of $L^2(\pi_\Theta; \mathbb{R}^{p \times d})$.
+>
+> **(c) Identification in $C(\overline{\mathrm{supp}(\pi_\Theta)}, \mathbb{R}^{p \times d})$.** Suppose furthermore:
+>
+> - **(BAY-1)** $\mathrm{supp}(\pi_\Theta)$ is the closure of a connected open subset $U \subseteq \Theta$ (so that $\overline{U} = \mathrm{supp}(\pi_\Theta)$).
+> - **(BAY-2)** $W$ and $W'$ are continuous on $\overline{\mathrm{supp}(\pi_\Theta)}$ (this is part of (C5)).
+> - **(BAY-3)** $\pi_\Theta$ assigns strictly positive measure to every non-empty open subset of $U$, so that the $\pi_\Theta$-a.e. identification set is dense in $U$. (Automatic when $\pi_\Theta$ is absolutely continuous with positive density on $U$.)
+>
+> Then $W$ and $W'$ are equal as elements of $C(\overline{\mathrm{supp}(\pi_\Theta)}, \mathbb{R}^{p \times d})$.
+>
+> The conclusion **does not extend** to points outside $\overline{\mathrm{supp}(\pi_\Theta)}$, where the data carry no information about $W$.
+
+*Proof sketch.*
+
+(a) For each $\theta_*$ where Theorem 1A's hypotheses hold (by assumption a $\pi_\Theta$-full-measure subset of $\mathrm{supp}(\pi_\Theta)$), Theorem 1A identifies $W(\theta_*)$. Combined with (D-ID) via Lemma 1B, this gives $W(\theta_*) = W'(\theta_*)$ at each such $\theta_*$. Hence equality holds $\pi_\Theta$-a.e. on $\mathrm{supp}(\pi_\Theta)$.
+
+(b) $\pi_\Theta$-a.e. equality of two elements of $L^2(\pi_\Theta; \mathbb{R}^{p \times d})$ is equality in $L^2(\pi_\Theta)$ by definition.
+
+(c) Two ingredients are needed to lift (a) to equality in the continuous-function space:
+
+- *(c1) The identification set is dense in $U$.* By (BAY-3), every non-empty open subset of $U$ has positive $\pi_\Theta$-measure. The complement of the identification set in $\mathrm{supp}(\pi_\Theta)$ is $\pi_\Theta$-null, so it cannot contain any non-empty open subset of $U$. Hence the identification set intersects every non-empty open subset of $U$, i.e., is dense in $U$.
+- *(c2) Continuous extension.* By (BAY-1), $\overline{U} = \mathrm{supp}(\pi_\Theta)$. By (BAY-2), $W$ and $W'$ are continuous on $\overline{\mathrm{supp}(\pi_\Theta)}$. Two continuous functions agreeing on a dense subset of $U$ agree throughout $\overline{U} = \overline{\mathrm{supp}(\pi_\Theta)}$, i.e., are equal as elements of $C(\overline{\mathrm{supp}(\pi_\Theta)}, \mathbb{R}^{p \times d})$.
+
+Combining (c1) and (c2) gives the conclusion in (c). $\square$
+
+**Plain reading.** The most reliable conclusion of the theorem is tier (b): $W$ is identified as an element of $L^2(\pi_\Theta; \mathbb{R}^{p \times d})$ under just the basic hypotheses (Theorem 1A applied $\pi_\Theta$-a.e., plus (D-ID)). Tier (c) ---identification as an element of $C(\overline{\mathrm{supp}(\pi_\Theta)})$--- is a strictly stronger conclusion that requires three extra regularity assumptions: connected-open structure of the support ((BAY-1)), continuity of $W$ ((BAY-2), already in (C5)), and **full $\pi_\Theta$-loading of the interior** ((BAY-3)) so that the $\pi_\Theta$-a.e. identification set is dense. The framework's recommended default is to report identification at the $L^2(\pi_\Theta)$ level, escalating to $C(\overline{\mathrm{supp}(\pi_\Theta)})$ only when the three regularity conditions are explicitly verified for the chosen prior. For absolutely continuous priors with positive density on a connected open set, the three are automatic.
+
+**Caveats.**
+
+(i) Tiers (a) and (b) are equivalence-class statements: $W$ is determined except on a $\pi_\Theta$-null set. For prior support with isolated atoms or disconnected pieces, two functions agreeing as elements of $L^2(\pi_\Theta)$ may differ pointwise on null subsets without violating the conclusion.
+
+(ii) Tier (c) requires both a "fat" topological structure of the support ((BAY-1)) **and** density of the $\pi_\Theta$-identification set in the interior ((BAY-3)). (BAY-3) is the condition guaranteeing density; without it, one could have $\pi_\Theta$-a.e. equality with the identification set concentrated on a $\pi_\Theta$-charged subset that is not topologically dense, defeating the continuous-extension argument.
+
+(iii) **None of the three tiers identifies $W$ outside $\overline{\mathrm{supp}(\pi_\Theta)}$.** At points $\theta \notin \overline{\mathrm{supp}(\pi_\Theta)}$, the value $W(\theta)$ is unconstrained by the data. Predictions at out-of-support reference values rely entirely on prior assumptions and should be reported as such.
+
+## **6.8. Proposition 1F: Scope and Limits of Identifiability for the Hypernetwork (Path 3)**
+
+The hypernetwork case requires a separate treatment because $\mathcal{F}_a, \mathcal{F}_b, \mathcal{F}_W$ ---the images of feedforward neural networks--- are **not linear subspaces** of $L^2(\mu, \mathbb{R}^p)$ but rather nonlinear manifolds. The hypothesis (LIN) of Theorem 1A does not apply, and the theorem's conclusion does not transfer. We state what can and cannot be claimed.
+
+> **Proposition 1F.** Consider the hypernetwork model
+> $$\theta_i \;=\; \theta_{\text{ref}} + a_\phi(x_i) + b_\phi(x_i) \odot \theta_{\text{ref}} + W_\phi(\theta_{\text{ref}}) x_i,$$
+> where $a_\phi, b_\phi, W_\phi$ are realized by feedforward neural networks with parameters $\phi$, trained with a loss that explicitly enforces (C1)-(C4) via penalty terms (Section 10.3). Then:
+>
+> **(i) The realized function $\Phi_\phi(x, \theta) = a_\phi(x) + b_\phi(x) \odot \theta + W_\phi(\theta) x$ is the object of inference**, in the sense that all reported posteriors, predictions, and component decompositions are defined on $\Phi_\phi$ as an element of the realized function class.
+>
+> **(ii) The network parameters $\phi$ are not identifiable from $\Phi_\phi$**: standard symmetries of feedforward networks ---permutation of hidden units, sign flips, weight rescaling under the corresponding nonlinearity--- produce parameter tuples $\phi \neq \phi'$ with $\Phi_\phi = \Phi_{\phi'}$.
+>
+> **(iii) Under (D-ID) of Lemma 1B, $\Phi_\phi$ is identifiable up to $L^2(\mu \otimes \pi_\Theta)$-equivalence**: two parameter tuples $\phi, \phi'$ producing the same observable joint distribution of $(X, Y)$ for $\theta_{\text{ref}}$ ranging over $\mathrm{supp}(\pi_\Theta)$ yield realized functions $\Phi_\phi$ and $\Phi_{\phi'}$ that coincide $\mu \otimes \pi_\Theta$-almost everywhere on $\mathrm{supp}(\mu) \times \mathrm{supp}(\pi_\Theta)$, equivalently are equal as elements of $L^2(\mu \otimes \pi_\Theta; \mathbb{R}^p)$.
+
+*Proof.* Claim (ii) follows from the listed symmetries, which are well-documented invariances of feedforward networks. Claim (i) is the framework's stipulated convention, made consistent with (ii). Claim (iii): under (D-ID), the conditional law of $Y$ given $(X, \theta_{\text{ref}})$ uniquely determines $\theta_i(X, \theta_{\text{ref}})$ at $\mu \otimes \pi_\Theta$-a.e. point of $\mathrm{supp}(\mu) \times \mathrm{supp}(\pi_\Theta)$. Subtracting $\theta_{\text{ref}}$ (a known input to $\Phi_\phi$) yields equality of $\Phi_\phi$ and $\Phi_{\phi'}$ at $\mu \otimes \pi_\Theta$-a.e. point of the product support, i.e., equality in $L^2(\mu \otimes \pi_\Theta; \mathbb{R}^p)$. $\square$
+
+**Scope of (iii).** This claim is a function-level identifiability statement about the data-generating regression function realized by the network, conditional on the response distribution being identifiable in $\theta$. It is **strictly weaker** than identifiability of the AMM decomposition $\Phi_\phi(x, \theta) = a_\phi(x) + b_\phi(x) \odot \theta + W_\phi(\theta) x$ into its three components: two distinct triples $(a_\phi, b_\phi, W_\phi)$ may yield the same $\Phi_\phi$ in $L^2(\mu \otimes \pi_\Theta)$ if the AMM decomposition fails an analogue of FIC at the function-class level. Decomposition identifiability for the hypernetwork is the open question discussed below.
+
+**Approximation context (not part of the proposition).** By the universal-approximation results of Hornik (1991) and Pinkus (1999), as network width or depth grows, the realized function class is dense in $C(\mathcal{K}, \mathbb{R}^p)$ on any compact $\mathcal{K} \subseteq \mathcal{X} \times \Theta$. **This is a statement about the architecture's expressive capacity ---specifically, its ability to approximate any target deviation function--- and is logically distinct from identifiability.** Density says that for any continuous $\Phi$ there exists an approximating $\phi$; it does not say that the data uniquely determine which $\Phi$ the parameter $\phi$ is approximating. The framework records this distinction explicitly to avoid the common conflation.
+
+**On function-level identifiability of $\Phi_\phi$.**
+
+Identifiability of $\Phi_\phi$ from the observable joint distribution of $(X_i, Y_i)$ is **not stated as a theorem** here. It requires hypotheses that go beyond the scope of this block:
+
+- **(D-ID)** for the response distribution (so that $\theta_i(\cdot)$ is identifiable from data).
+- A **structural condition on the realized function class** of $\Phi_\phi$ analogous to FIC ---specifically, that the AMM decomposition imposed by the sub-networks $a_\phi, b_\phi, W_\phi$ does not admit nontrivial cancellations between components within the network's expressive range. This condition is problem-specific: it depends on the architecture, the regularization, and the prior over $\theta_{\text{ref}}$.
+- A **richness condition on the empirical distribution of $(X_i, \theta_{\text{ref}})$ pairs** sufficient to constrain $\Phi_\phi$ on its full domain.
+
+A general sufficient-conditions theorem for function-level identifiability of $\Phi_\phi$ in the universal AMM setting is an open question whose closure depends on ingredients from posterior-contraction theory of Bayesian neural networks that are not settled at the time of writing. Block 6 collects partial results known: consistency under the Neural Tangent Kernel regime (Jacot et al. 2018; Bach 2017), PAC-Bayes generalization bounds (Dziugaite and Roy 2017), and explicit recognition of the asymptotic theory of Bayesian neural networks as an active research area (Hron et al. 2020).
+
+**Operational consequence for the implementation.** Path 3 reports posteriors over $\Phi_\phi$ together with three baseline diagnostics: (1) the empirical norms $\|a_\phi\|_{L^2(\mu)}$, $\|b_\phi\|_{L^2(\mu)}$, $\|W_\phi\|_{L^2(\pi_\Theta)}$ to detect dormant components; (2) cross-validated posterior predictive checks to detect undetected non-identifiability via predictive instability; (3) explicit comparison to Path 1 fits on the same data when Path 1 is feasible, since Path 1 admits the closed-form identifiability theory of results 1A-1E (Theorem 1A, Lemma 1B, Proposition 1C, Scheme 1D, Theorem 1E). When Path 3 diverges substantially from Path 1 on the same data, the discrimination question becomes operational: is the divergence **richer structural heterogeneity** that Path 1 cannot capture, or **undetected non-identifiability** in Path 3 that the regularization did not eliminate? The two possibilities have very different consequences for trust in the fit, so the framework provides an empirical protocol to discriminate between them.
+
+### **6.8.1. Empirical Protocol for Discriminating between Richer Structure and Non-Identifiability**
+
+When Path 3 diverges from Path 1 on the same data, the library runs a four-step protocol whose joint output discriminates the two scenarios. The protocol is empirical: it does not prove identifiability or non-identifiability ---no finite-sample test can--- but it accumulates evidence in either direction with explicit decision criteria.
+
+**Step 1: Stability across random seeds.** Refit Path 3 with $K \geq 5$ distinct random initializations of the network parameters $\phi$, holding architecture, regularization, and data fixed. For each test point $x$, compute the empirical standard deviation of the predicted $\widehat{\theta}_i(x)$ across the $K$ runs (across-run SD), and compare it with the within-run posterior standard deviation of $\theta_i(x)$ averaged across runs (within-run SD).
+
+- **Stable**: across-run SD $\leq 0.10 \times$ within-run SD. The realized function $\Phi_\phi$ converges to a stable object regardless of initialization. Non-identifiability of $\phi$ is benign at the function level.
+- **Unstable**: across-run SD substantially larger than within-run SD. Different seeds converge to qualitatively different functions. The regularization is not enforcing a unique $\Phi_\phi$, signalling **non-identifiability not visible to baseline diagnostics**.
+
+**Step 2: Out-of-sample comparison via stratified $k$-fold cross-validation.** Compute $\widehat{\text{elpd}}_\text{loo}^{(\text{cv})}$ for both Path 1 and Path 3 over a $k$-fold split (default $k = 10$), stratified by quantiles of $x$. Compute the per-fold differences $\Delta\widehat{\text{elpd}}_j = \widehat{\text{elpd}}_3^{(j)} - \widehat{\text{elpd}}_1^{(j)}$ and their mean and standard error across folds.
+
+- **Path 3 captures real structure**: $\overline{\Delta\widehat{\text{elpd}}} > 2 \cdot \text{SE}$ and the fold-wise differences are predominantly positive (e.g., positive in $\geq 80\%$ of folds).
+- **Path 3 is overfitting noise**: $\overline{\Delta\widehat{\text{elpd}}}$ near zero or negative, or fold-wise differences alternate sign, indicating Path 3 fits in-sample noise that does not generalize.
+
+**Step 3: Calibration of posterior predictive intervals.** On the held-out folds of Step 2, compute the empirical coverage of nominal $(1 - \alpha)$ posterior predictive intervals for both paths, at $\alpha \in \{0.05, 0.20, 0.50\}$.
+
+- **Both calibrated**: empirical coverage within $\pm 0.05$ of nominal across all $\alpha$. Both paths produce trustworthy uncertainty estimates.
+- **Only Path 1 calibrated**: Path 3's posterior is **misspecified** ---either overconfident (too narrow) or underconfident (too wide). Path 3's predictions, even if mean-correct, cannot be trusted for probabilistic inference.
+- **Both miscalibrated**: a problem with the model class itself (likely the response distribution $\mathcal{D}$), not with the discrimination question; the user is alerted to revisit the response specification.
+
+**Step 4: Component-wise decomposition of the divergence.** Compute the per-test-point difference $\Delta\theta(x) = \widehat{\theta}_3(x) - \widehat{\theta}_1(x)$ and decompose it via the AMM structure:
+
+$$\Delta\theta(x) \;=\; \underbrace{\Delta a(x)}_{\text{additive piece}} + \underbrace{\Delta b(x) \odot \widehat{\theta}_{\text{ref}}}_{\text{multiplicative piece}} + \underbrace{\Delta W(\widehat{\theta}_{\text{ref}}) x}_{\text{modulated piece}}.$$
+
+For each piece, compute its share of the total $\|\Delta\theta\|_{L^2(\mu)}$ and compare with the empirical norm of the corresponding component in Path 3.
+
+- **Divergence concentrated in active components** (component norm in Path 3 substantial relative to other components): the divergence reflects mechanisms that Path 3 represents and Path 1 cannot.
+- **Divergence concentrated in dormant components** (component norm in Path 3 small): the divergence is likely numerical artifact of the network's residual non-identifiability, not real structure.
+
+### **6.8.2. Decision Rule**
+
+Combine the four diagnostics into a single recommendation:
+
+| Step 1 | Step 2 | Step 3 | Step 4 | Verdict |
+|:------:|:------:|:------:|:------:|:--------|
+| Stable | Path 3 wins | Both calibrated | In active components | **Richer structure**: Path 3's divergence is structural; trust Path 3 |
+| Stable | Path 3 wins | Path 3 miscalibrated | Any | **Mixed**: Path 3 captures structure but uncertainty quantification untrustworthy; report point predictions only |
+| Stable | Tied or Path 1 wins | Either | Any | **No structural advantage**: Path 1 is preferred for parsimony |
+| Unstable | Any | Any | Any | **Non-identifiability**: Path 3's $\Phi_\phi$ is not a stable target; trust Path 1 |
+| Any | Any | Both miscalibrated | Any | **Model misspecified**: revisit the response distribution $\mathcal{D}$; neither path is trustworthy as-is |
+
+The library reports the four diagnostics in a single comparison panel together with the row of the decision rule that the data triggers. **The diagnostic output does not replace user judgment**: an analyst with substantive prior knowledge may override the verdict (e.g., choosing Path 3 despite an "unstable" verdict if the application demands the expressive capacity and predictive stability is acceptable for the use case), but the verdict makes the trade-off explicit rather than silent.
+
+**Why this protocol works.** The four diagnostics target the four ways Path 3 can diverge from Path 1: (1) parameter-level convergence to inconsistent functional realizations (Step 1), (2) overfitting in-sample noise that does not generalize (Step 2), (3) producing point predictions that are correct on average but with wrong uncertainty (Step 3), (4) hiding the divergence in a component that the model has effectively zeroed out (Step 4). At least one of these will register when the divergence is non-identifiability; none will register when the divergence is genuine structural heterogeneity. The diagnostic is a **necessary set of empirical filters**, not a closed mathematical equivalence, but in practice it identifies the source of divergence reliably.
+
+**What it cannot do.** No empirical protocol can prove identifiability with finite data. The protocol provides evidence weighted toward one or the other interpretation; it does not provide a formal certificate. In particular, a Path 3 fit can pass all four diagnostics and still be non-identifiable in directions that the held-out data do not probe ---a fundamental limit of any data-based discrimination, not a defect of the protocol.
+
+---
+
+# **7. Identifiability of Higher Levels of the Hierarchy**
+
+Results 1A-1F (Theorem 1A, Lemma 1B, Proposition 1C, Scheme 1D, Theorem 1E, Proposition 1F) are stated for the Level-2 canonical AMM. Higher levels admit analogous results under minimal modifications.
+
+**Level 2.5 (full-matrix multiplicative).** Replace $b(x) \odot \theta_*$ by $B(x) \theta_*$, with $B \in \mathcal{F}_B \subseteq L^2_0(\mu, \mathbb{R}^{p \times p})$ a finite-dimensional linear subspace. The proof of Theorem 1A goes through with the obvious modification of $\mathcal{S}_b(\theta_*) = \{B \theta_* : B \in \mathcal{F}_B\}$. The Gram matrix gains $J_B \cdot p$ columns instead of $J_b \cdot p$.
+
+**Level 3 (quadratic extensions).** Each new term contributes its own component subspace to the FIC. The condition becomes the joint linear independence of the (now five or more) subspaces. The Gram matrix has additional blocks; the eigenvalue diagnostic extends naturally. Theorem 1A's proof structure is identical with extra terms in equations $(\ast)$ and $(\diamond)$.
+
+**Level $K$ (polynomial closure).** The FIC condition becomes joint linear independence of the $O(K^2)$ component subspaces. The Gram matrix has $O(K^4)$ entries; for $K \leq 4$, common in applications, the diagnostic remains computationally tractable.
+
+**Level $\infty$ (universal AMM, hypernetwork).** Treated by Proposition 1F: parameter non-identifiability, density (not identifiability) from universal approximation, and explicit acknowledgement that function-level identifiability of $\Phi_\phi$ requires further problem-specific hypotheses beyond this block.
+
+---
+
+# **8. Standard Models as Special Cases**
+
+We verify that each standard model in the literature falls within the scope of Theorem 1A by checking that its function classes satisfy (LIN).
+
+## **8.1. Standard Regression**
+
+Restriction: $\mathcal{F}_a = \{0\}$, $\mathcal{F}_b = \{0\}$, $\mathcal{F}_W = \{0\}$. AMM Level: 0.
+
+(LIN) trivially satisfied. Identifiability holds trivially.
+
+## **8.2. Random-Coefficient Model**
+
+Restriction: $\mathcal{F}_a = \{x \mapsto Ax : A \in \mathbb{R}^{p \times d}\}$, $\mathcal{F}_b = \{0\}$, $\mathcal{F}_W = \{0\}$. AMM Level: 1.
+
+(LIN) holds: $\mathcal{F}_a$ is a linear subspace of dimension $pd$. Identifiability under Theorem 1A reduces to non-singularity of $\mathrm{Cov}_\mu(X)$, which is (C5).
+
+## **8.3. Varying-Coefficient Model (Hastie and Tibshirani 1993)**
+
+Restriction: $\mathcal{F}_a$ = spline space of finite dimension with no-constant basis; $\mathcal{F}_b = \{0\}$; $\mathcal{F}_W$ = matrix-valued spline space anchored at $\theta_0$. AMM Level: 2 with $b \equiv 0$.
+
+(LIN) holds when the spline spaces have explicit bases. Identifiability under Theorem 1A reduces to FIC restricted to the chosen splines, diagnosed by Proposition 1C.
+
+## **8.4. Hierarchical Bayesian with Multiplicative Interaction**
+
+Restriction: $\mathcal{F}_a$ = parametric finite-dim space (e.g., polynomials), $\mathcal{F}_b$ = parametric finite-dim space, $\mathcal{F}_W = \{0\}$. AMM Level: 2 with $W \equiv 0$.
+
+(LIN) holds. Identifiability under Theorem 1A reduces to FIC between $\mathcal{F}_a$ and $\mathcal{F}_b \odot \theta_*$. (C6) is critical: a zero coordinate of $\theta_*$ destroys identifiability of $b$ in that coordinate.
+
+## **8.5. Full Canonical AMM**
+
+All three components active, finite-dim linear subspaces. AMM Level: 2 (full).
+
+(LIN) holds. Identifiability requires the full FIC plus (C6).
+
+## **8.6. Hypernetwork**
+
+Function classes are images of neural networks. **(LIN) does not hold**: these are nonlinear manifolds.
+
+Theorem 1A does not apply. The hypernetwork case is treated by Proposition 1F: parameter non-identifiability, density (not identifiability) from universal approximation, and explicit acknowledgement that function-level identifiability of $\Phi_\phi$ requires additional problem-specific hypotheses not stated as a closed theorem at this level of generality.
+
+---
+
+# **9. Test for Component Selection**
+
+Theorem 1A identifies the components of a Level-2 AMM under FIC. The complementary practical question is which components are *active*: in a given dataset, $a, b$, or $W$ may be effectively zero.
+
+## **9.1. Bayesian Selection via Stratified PSIS-LOO**
+
+For each restriction $M_S$ with $S \subseteq \{a, b, W\}$, fit and compute the leave-one-out expected log predictive density (Vehtari, Gelman, and Gabry 2017):
+
+$$\widehat{\mathrm{elpd}}_{M_S} \;=\; \sum_{i=1}^n \log \widehat{p}_{-i}(y_i \mid x_i, M_S).$$
+
+Compare candidates by $\Delta\widehat{\mathrm{elpd}}$ relative to the full Level-2 model. Differences exceeding two standard errors are taken as substantive.
+
+A novel diagnostic is **stratified PSIS-LOO**: $\widehat{\mathrm{elpd}}$ is computed within subgroups defined by quantiles or categorical levels of $x$. Components active only in subgroups indicate localizable structural heterogeneity. The library reports stratified PSIS-LOO automatically.
+
+## **9.2. Frequentist Selection via Generalized LRT**
+
+In the varying-coefficient implementation, generalized likelihood ratio tests adapted for spline models (Wood 2017) compare nested AMM restrictions, with $\chi^2$ reference distribution on the difference in effective degrees of freedom.
+
+## **9.3. Hypernetwork Component Norms**
+
+In the hypernetwork implementation, post-training norms
+
+$$\bigl\|a_\phi\bigr\|_{L^2(\mu)}, \quad \bigl\|b_\phi\bigr\|_{L^2(\mu)}, \quad \bigl\|W_\phi\bigr\|_{L^2(\pi_\Theta)}$$
+
+are compared against the regularization scale. A norm close to zero indicates the corresponding component does not contribute and can be pruned.
+
+## **9.4. Reported Selection Output**
+
+The package produces, for any fitted model, a comparison table over the eight AMM restrictions $M_\emptyset, M_a, M_b, M_W, M_{ab}, M_{aW}, M_{bW}, M_{abW}$, with $\Delta\widehat{\mathrm{elpd}}$ and standard error per restriction.
+
+---
+
+# **10. Implementation Implications**
+
+Three principles follow from the theorems:
+
+1. **Centering and anchoring are enforced at every step.** The bases for $a$ and $b$ exclude constants; the modulating matrix $W$ vanishes at the anchor; covariates are centered before fitting.
+2. **The Gram-matrix diagnostic runs before estimation.** If $\text{FIC}_B$ fails empirically, the user is informed and the fit is aborted, with the failure direction reported. This converts an obscure non-identifiability into an explicit modelling decision.
+3. **Stratified PSIS-LOO is reported by default** alongside global PSIS-LOO. Component selection is justified per subgroup, not only globally.
+
+### **10.1. Path 1: Hierarchical Bayesian via Stan**
+
+Stan declares $\theta_{\text{ref}}$, the basis coefficients of $a$ and $b$, and the matrix coefficients of $W$. (C2) and (C3) are enforced empirically by column-wise centering of the design matrices $\mathbf{Z}_a$ and $\mathbf{Z}_b$ inside the R-side AMM design constructor: each column of $\mathbf{Z}_a$ (resp. $\mathbf{Z}_b$) has its sample mean subtracted, so that $\mathrm{colMeans}(\mathbf{Z}_a) = \mathbf{0}$ (resp. $\mathbf{Z}_b$) exactly. Because $\mathbb{E}_\mu[a(X)] = \mathrm{colMeans}(\mathbf{Z}_a) \cdot \mathbf{a}_{\mathrm{coef}}$ under the empirical $\mu$, the centering of $\mathbf{Z}_a$ alone satisfies (C2) for any choice of $\mathbf{a}_{\mathrm{coef}} \in \mathbb{R}^{J_a}$; analogously for (C3). No further restriction on the basis coefficients is imposed by the Stan model, since imposing $\mathbf{1}^\top \mathbf{a}_{\mathrm{coef}} = 0$ on top of column-centered $\mathbf{Z}_a$ would arbitrarily restrict $\mathbf{a}_{\mathrm{coef}}$ to a $(J_a - 1)$-dimensional subspace and exclude effects with non-zero coefficient mean (e.g. $\mathbf{a}_{\mathrm{coef}} = (1.0, -0.8)$ for two continuous covariates), with no support in (C2). (C4) is enforced by the parametrization $W(\theta) = W_0(\theta) - W_0(\theta_0)$. The Gram-matrix check from Proposition 1C runs on the design matrix before sampling.
+
+### **10.2. Path 2: Varying-Coefficient via mgcv**
+
+The varying-coefficient component is fit via penalized splines using `mgcv::gam`. The AMM structure is encoded as `s(x, by = ...)` interactions with a custom design matrix satisfying the centering constraints. The smoothness penalty regularizes the implicit basis coefficients consistent with Fan-Zhang asymptotics.
+
+### **10.3. Path 3: Amortized Inference via torch**
+
+The hypernetwork has three parallel sub-networks. (C1)-(C4) are enforced via penalty terms in the loss:
+
+$$\mathcal{L}(\phi) \;=\; -\sum_{i=1}^n \log p(y_i \mid \theta_i) + \lambda_a \bigl\|\bar{a}_\phi\bigr\|^2 + \lambda_b \bigl\|\bar{b}_\phi\bigr\|^2 + \lambda_W \bigl\|W_\phi(\theta_0)\bigr\|_F^2,$$
+
+with $\bar{a}_\phi = n^{-1} \sum_i a_\phi(x_i)$. As $\lambda_a, \lambda_b, \lambda_W \to \infty$, the centering and anchoring conditions are imposed exactly; in practice $\lambda \in [10, 100]$ suffices. Identifiability holds at the function level (Proposition 1F).
+
+---
+
+# **11. Summary of the Block**
+
+This block has established, with explicit separation of three layers of identifiability:
+
+1. The **AMM hierarchy** (Section 3) of structurally distinct deviation forms, with **Scheme 1D** giving an approximation result for the polynomial restriction and explicit caveats on its scope.
+
+2. The **canonical Level-2 AMM form** (Section 3.3) and three reasons for its default status (Section 4).
+
+3. The **standing assumptions (C1)-(C6)** (Section 5), all interpretable and verifiable, with (C6) elevated from a remark to an explicit hypothesis.
+
+4. **Theorem 1A** (Section 6.3): algebraic-functional identifiability of the canonical AMM under the linearity of the function classes (LIN), the centering and anchoring conditions, the non-degeneracy of the reference (C6), and Abstract FIC at the true reference.
+
+5. **Lemma 1B** (Section 6.4): the statistical bridge from the latent function to observable data, requiring the explicit hypothesis (D-ID) that the response distribution family is identifiable in its parameter.
+
+6. **Corollary 1** (Section 6.5): the centering of the framework as a theorem.
+
+7. **Proposition 1C** (Section 6.6): the Gram-matrix diagnostic for **basis-restricted FIC**, with explicit caveats distinguishing it from abstract FIC.
+
+8. **Theorem 1E** (Section 6.7): three-tier identifiability of $W$ on the closure of the prior support ---$\pi_\Theta$-a.e., $L^2(\pi_\Theta)$, and pointwise on $\overline{\mathrm{supp}(\pi_\Theta)}$ under additional regularity (BAY-1), (BAY-2), and (BAY-3)--- with explicit notion of identifiability at each tier and explicit acknowledgement that the conclusion does not extend outside the prior support.
+
+9. **Proposition 1F** (Section 6.8): the hypernetwork case, stating that $\Phi_\phi$ is the object of inference, that the parameters $\phi$ are not identifiable due to network symmetries, and that under (D-ID) the realized function $\Phi_\phi$ is identifiable up to $L^2(\mu \otimes \pi_\Theta)$-equivalence ---**a function-level claim strictly weaker than identifiability of the AMM decomposition**, which remains an open question at this level of generality.
+
+10. **Empirical discrimination protocol** (Section 6.8.1) of four steps ---stability across random seeds, out-of-sample comparison, calibration, component-wise divergence decomposition--- with an explicit **decision rule** (Section 6.8.2) that weighs Path 3's divergence from Path 1 toward "richer structural heterogeneity" or "undetected non-identifiability". The protocol is acknowledged as evidence-weighted, not as a formal identifiability certificate.
+
+11. **Subsumption** (Section 8) of standard models as special cases of Theorem 1A, with verification that (LIN) holds in each. The hypernetwork case is verified to fall outside Theorem 1A's scope and into Proposition 1F's scope.
+
+12. A **selection protocol** for AMM components (Section 9) and concrete **implementation implications** for each of the three estimation paths (Section 10).
+
+The three layers are separated throughout: algebraic-functional identifiability (Theorem 1A) is independent of the response distribution and is recovered by Lemma 1B at the statistical level; basis-restricted identifiability (Proposition 1C) is the runtime diagnostic, distinct from the abstract condition; the hypernetwork case is treated by its own proposition, not as a corollary of the linear-class result, and is kept honest about the gap between density and identifiability.
+
+---
+
+# **12. Connections to Subsequent Blocks**
+
+- **Block 2** (validity conditions for the population reference) builds on the AMM canonical form and FIC to formulate conditions under which $\theta_{\text{ref}}$ functions as a faithful population-level expression of the system, with internal diagnostics for violations.
+- **Block 3** (special cases) provides full proofs of the subsumptions of Section 8.
+- **Blocks 4-6** (asymptotic theory) state asymptotic results for the canonical AMM in each estimation path, with conditions specializing the standing assumptions of this block.
+
+---
+
+# **Appendix A. AMM Notation**
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $\Delta(x, \theta_{\text{ref}})$ | Deviation function |
+| $a(x)$ | Additive component (vector $p$) |
+| $b(x)$ | Multiplicative component (vector $p$, Hadamard with $\theta_{\text{ref}}$) |
+| $B(x)$ | Matrix multiplicative component (Level 2.5) |
+| $W(\theta)$ | Modulating component (matrix $p \times d$) |
+| $\theta_0$ | Anchor point in $\Theta$ where $W(\theta_0) = 0$ |
+| $\theta_*$ | True value of the population reference |
+| $\Theta^\circ$ | $\{\theta \in \Theta : \theta_k \neq 0 \;\forall k\}$ |
+| $\mathcal{F}_a, \mathcal{F}_b, \mathcal{F}_W$ | Function classes for the components |
+| $\mathcal{S}_a, \mathcal{S}_b(\theta_*), \mathcal{S}_W$ | Component subspaces in $L^2(\mu, \mathbb{R}^p)$ |
+| $B$ | Finite basis in a parametric representation |
+| $\mathbf{Z}_n(\theta_*)$ | Extended design matrix (Proposition 1C) |
+| $\mathbf{G}_n(\theta_*)$ | Empirical Gram matrix |
+| $\odot$ | Hadamard (elementwise) product |
+| $\otimes$ | Kronecker / tensor product |
+
+---
+
+# **Appendix B. Acronyms and Hypotheses**
+
+- **AMM**: Additive-Multiplicative-Modulated.
+- **FIC**: Functional Independence Condition (abstract).
+- **$\text{FIC}_B$**: Functional Independence Condition restricted to a finite basis $B$.
+- **PSIS-LOO**: Pareto-Smoothed Importance Sampling Leave-One-Out cross-validation.
+- **LRT**: Likelihood Ratio Test.
+- **VCM**: Varying-Coefficient Model.
+
+| Hypothesis | Content |
+|:-----------|:--------|
+| (C1) | $\mathbb{E}_\mu[X] = 0$ |
+| (C2) | $\mathbb{E}_\mu[a(X)] = 0$ |
+| (C3) | $\mathbb{E}_\mu[b(X)] = 0$ |
+| (C4) | $W(\theta_0) = 0$ for some $\theta_0 \in \Theta$ |
+| (C5) | $\mathrm{Cov}_\mu(X)$ full rank; $a, b \in L^2$; $W \in C(\Theta)$ bounded |
+| (C6) | $\theta_* \in \Theta^\circ$ (no zero coordinates) |
+| (C7) | Per-group anchor anti-aliasing (Block 6.5, Section 6.6.2): when `use_groups = 1`, $\mathrm{rank}([G \mid Z_a]) = \mathrm{ncol}(G) + \mathrm{ncol}(Z_a)$ and likewise for $Z_b$ |
+| (LIN) | $\mathcal{F}_a, \mathcal{F}_b, \mathcal{F}_W$ are finite-dim linear subspaces |
+| (EVAL) | Point evaluation $E_{\theta_*}: \mathcal{F}_W \to \mathbb{R}^{p \times d}$ is surjective (used in Necessity Proposition only) |
+| (D-ID) | $\{\mathcal{D}(\theta) : \theta \in \mathbb{R}^p\}$ identifiable in $\theta$ |
+| (BAY-1) | $\mathrm{supp}(\pi_\Theta)$ is the closure of a connected open subset of $\Theta$ |
+| (BAY-2) | $W$ continuous on $\overline{\mathrm{supp}(\pi_\Theta)}$ (subsumed by (C5)) |
+| (BAY-3) | $\pi_\Theta$ assigns positive measure to every non-empty open subset of its interior |
+
+---
+
+# **References Cited in This Block**
+
+Bach, F. (2017). Breaking the curse of dimensionality with convex neural networks. *Journal of Machine Learning Research*, 18, 1--53.
+
+Dziugaite, G. K., and Roy, D. M. (2017). Computing nonvacuous generalization bounds for deep (stochastic) neural networks with many more parameters than training data. *Proceedings of UAI*.
+
+Fan, J., and Zhang, W. (2008). Statistical methods with varying coefficient models. *Statistics and Its Interface*, 1(1), 179--195.
+
+Greene, W. H. (1994). Accounting for excess zeros and sample selection in Poisson and negative binomial regression models. NYU Working Paper EC-94-10.
+
+Hastie, T., and Tibshirani, R. (1993). Varying-coefficient models. *Journal of the Royal Statistical Society, Series B*, 55(4), 757--796.
+
+Hornik, K. (1991). Approximation capabilities of multilayer feedforward networks. *Neural Networks*, 4(2), 251--257.
+
+Lambert, D. (1992). Zero-inflated Poisson regression with an application to defects in manufacturing. *Technometrics*, 34(1), 1--14.
+
+Patton, A. J. (2006). Modelling asymmetric exchange rate dependence. *International Economic Review*, 47(2), 527--556.
+
+Pinkus, A. (1999). Approximation theory of the MLP model in neural networks. *Acta Numerica*, 8, 143--195.
+
+Raudenbush, S. W., and Bryk, A. S. (2002). *Hierarchical Linear Models: Applications and Data Analysis Methods*. Sage.
+
+Teicher, H. (1963). Identifiability of finite mixtures. *Annals of Mathematical Statistics*, 34, 1265--1269.
+
+Vehtari, A., Gelman, A., and Gabry, J. (2017). Practical Bayesian model evaluation using leave-one-out cross-validation and WAIC. *Statistics and Computing*, 27, 1413--1432.
+
+Wood, S. N. (2017). *Generalized Additive Models: An Introduction with R*, 2nd ed. Chapman and Hall/CRC.

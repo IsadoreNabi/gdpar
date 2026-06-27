@@ -1,0 +1,318 @@
+---
+title: "**Parametrization Toggle: Operational Guide**"
+subtitle: "API, automatic decision, and diagnostic introspection (Path 1)"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Parametrization Toggle: Operational Guide}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  collapse = TRUE, comment = "#>"
+)
+have_cmdstan <- requireNamespace("cmdstanr", quietly = TRUE)
+```
+
+---
+
+# **1. What this vignette covers**
+
+Path 1 of **gdpar** is a hierarchical Bayesian fit (Stan / HMC) of the AMM canonical decomposition
+
+$$\theta_i = \theta_{\text{ref}} + a(x_i) + b(x_i) \odot \theta_{\text{ref}} + W(\theta_{\text{ref}})\,x_i,$$
+
+where $\odot$ denotes the Hadamard (elementwise) product, coherent with the canonical notation of `vignette("v00_framework_overview", package = "gdpar")` §8.2 and `vignette("v01_amm_identifiability", package = "gdpar")` §3.3.
+
+The additive component `a` and the modulating component `W` each carry a hierarchical scale parameter (`sigma_a`, `sigma_W`). For Stan to sample efficiently, each of these scales admits two parametrizations:
+
+- **Non-centered (NCP).** The hierarchical coefficient is written as `raw * sigma`, with `raw ~ normal(0, 1)`. Recommended in the *low-information* regime, where the marginal posterior of the coefficient stays close to the prior and the funnel is broad.
+- **Centered (CP).** The hierarchical coefficient is sampled directly with `coef ~ normal(0, sigma)`. Recommended in the *high-information* regime, where the marginal posterior is tightly identified and CP avoids the funnel at the bottom of the NCP geometry.
+
+The function `gdpar()` exposes a flag `parametrization` (and per-component overrides `parametrization_a`, `parametrization_W`) that controls which parametrization is used for the long fit. Default value `"auto"` runs a short pre-flight NCP fit and decides per-component automatically. This vignette documents:
+
+1. The API and when to use each mode.
+2. The three filters that drive the automatic decision.
+3. How to introspect the decision via `fit$parametrization$meta`.
+4. A runnable end-to-end example.
+5. Known limitations.
+
+For the underlying canonical form and identifiability theory, see `vignette("v01_amm_identifiability", package = "gdpar")` and `vignette("v04_asymptotics_path1_bayesian", package = "gdpar")`.
+
+---
+
+# **2. API**
+
+## **2.1. Global flag**
+
+```r
+fit <- gdpar(..., parametrization = "auto")  # default
+fit <- gdpar(..., parametrization = "ncp")   # force NCP everywhere
+fit <- gdpar(..., parametrization = "cp")    # force CP everywhere
+```
+
+- `"auto"` runs the pre-flight diagnostic (a 200 warmup + 200 sampling, 2-chain NCP fit with `adapt_delta = 0.95` and `max_treedepth = 10`) and applies three filters per component. Approximately 30% extra wall-time per `gdpar()` call.
+- `"ncp"` and `"cp"` skip the pre-flight and apply the choice to both `a` and `W`.
+
+## **2.2. Per-component overrides**
+
+```r
+fit <- gdpar(..., parametrization_a = "cp",
+                  parametrization_W = "ncp")
+```
+
+- `parametrization_a` and `parametrization_W` accept `"ncp"`, `"cp"`, or `NULL`.
+- When `NULL`, the component inherits from the global `parametrization`.
+- When **both** per-component overrides are explicit, the pre-flight is skipped regardless of `parametrization`.
+- A mixed case `parametrization = "auto", parametrization_a = "cp", parametrization_W = NULL` runs the pre-flight only for `W`, forcing CP on `a`.
+
+## **2.3. When to use which mode**
+
+| Situation | Recommended mode |
+|---|---|
+| Default exploratory work, no prior knowledge of geometry | `parametrization = "auto"` |
+| Calibration runs where reproducibility across configurations matters | Explicit `"ncp"` or `"cp"` to remove the data-dependent decision |
+| Production pipelines where the pre-flight wall-time is unacceptable | Explicit choice, informed by an earlier `"auto"` run |
+| Strong prior belief that the posterior is far from the prior (high `n`, low residual noise) | `"cp"` |
+| Strong prior belief that the posterior is close to the prior (small `n`, weak signal) | `"ncp"` |
+| `a` is high-info but `W` is low-info (or vice versa) | `parametrization_a` and `parametrization_W` separately |
+
+## **2.4. Anchor configuration**
+
+The `anchor` argument of `gdpar()` fixes the reference point against which the AMM deviation is measured. It admits three forms:
+
+- `anchor = "prior_mean"` (default): the anchor is set to the prior mean of $\theta_{\text{ref}}$. This is the standard choice for AMM identifiability under (C1)-(C7) and matches the canonical centering convention of the framework.
+- `anchor = "empirical_y"`: the anchor is estimated by inverting the link function at the sample mean of $y$. Useful when no defensible prior on $\theta_{\text{ref}}$ is available or when an empirical reference point is preferred for interpretability.
+- `anchor = <numeric>`: an explicit numeric anchor. Accepts a scalar when $p = 1$, a length-$p$ vector when $p > 1$, and a length-$K$ vector when $K > 1$ (per-slot anchors). Validated by `resolve_anchor()` against the dimensions of the model.
+
+The anchor interacts with the parametrization toggle: under CP the prior on $\theta_{\text{ref}}$ is centred on the anchor; under NCP the same anchor enters as the shift parameter in the non-centred reparametrization. The toggle is anchor-agnostic --- both modes admit any of the three forms.
+
+For the multi-slot case ($K > 1$), the anchor receives one value per slot; see vignettes `vop05_distributional_K_dharma` and `vop07_eb_workflow` for slot-specific recipes.
+
+---
+
+# **3. The "auto" decision: three filters**
+
+The pre-flight diagnostic of `gdpar()` is split into two paths: the **multivariate path** (`R/preflight_multi.R`) handles $p > 1$ and numbers its checks **filters 1-3**; the **scalar path** (`R/preflight.R`) handles $p = 1$ and numbers its checks **filters 4-6** as the scalar homologues of filters 1-3 respectively (the numbering is historical and preserved for cross-reference with `vop02` §6 where filters 1-3 are documented in their multivariate form). This vignette covers the scalar path; the three filters described below are the scalar homologues of the multivariate triple.
+
+Orthogonal to the parametrization filters, the upstream **basis-restricted identifiability check** runs before the pre-flight fires. Its strictness is controlled by the `gdpar()` argument `id_check_rigor = c("full", "fast")` (default `"full"`), which propagates verbatim to `gdpar_check_identifiability(rigor = ...)`. Under `"full"` the check aborts on any violation of C1-C4 (scalar path) or C4-bis (multivariate path); under `"fast"` the cross-coordinate C4-bis check is downgraded to a single consolidated warning at the end of the per-coordinate loop, letting the fit proceed. See `vignette("v01_amm_identifiability", package = "gdpar")` §6.6.1 for the conditions C1-C4 and §6.6.1.4 for the `rigor = "full"` versus `rigor = "fast"` contract.
+
+When `parametrization = "auto"` (and at least one component has no explicit override), the pre-flight diagnostic samples a short NCP fit and applies three filters in priority order. The first filter to fire fixes the decision; subsequent filters only act on still-undecided components.
+
+## **3.1. Filter 4 — Divergence attribution**
+
+*Active only when the pre-flight produces at least one divergent transition.*
+
+For each component, every transition is scored by
+
+$$g_t = -z_{\log \sigma}(t)\cdot z_{\|raw\|}(t),$$
+
+where the z-scores are computed over all pre-flight transitions. High values of $g_t$ flag transitions concentrated in the funnel region of the NCP geometry. The test statistic is the centered mean over divergent transitions, divided by the standard error estimated from all transitions under the null that divergences are random with respect to the funnel geometry:
+
+$$S = \frac{\bar g_{\text{div}} - \bar g_{\text{all}}}{\sqrt{\widehat{\mathrm{Var}}(g) / n_{\text{div}}}}.$$
+
+Rejected at $\alpha = 0.025$ against the upper t-distribution with $n_{\text{div}}-1$ degrees of freedom — small $n_{\text{div}}$ self-regularizes via the heavier-tailed critical value. A rejection forces CP on that component with reason code `filter_attribution`.
+
+## **3.2. Filter 5 — E-BFMI**
+
+*Active when the minimum E-BFMI across chains is below 0.3.*
+
+Energy mixing pathologies in the pre-flight imply that the marginal of `sigma` is poorly explored regardless of which hierarchical coefficient drives the issue. The filter forces CP on any component not yet decided, with reason code `filter_ebfmi`. This filter cannot attribute the pathology per component because E-BFMI is a global chain-level diagnostic; it acts as a conservative blanket.
+
+## **3.3. Filter 6 — Info ratio (Path B')**
+
+*Active on any component still undecided after filters 4 and 5.*
+
+This filter measures how much the data contracted the marginal posterior of the component's effective coefficient relative to its prior scale. The implementation is **Path B'**, which differs from a naive per-coordinate t-test because of the rank deficiency of `W` evaluated at a scalar $\theta_{\text{ref}}$ (see Section 7).
+
+### **3.3.1. Effective coefficients and reference scale**
+
+For component `a`, the effective coefficient at coordinate $j$ per draw $t$ is
+
+$$\mathrm{eff}_a[t, j] = a_{\text{coef}}[t, j], \quad j = 1, \ldots, J_a^{\text{free}},$$
+
+and the per-draw reference scale is $\mathrm{ref}_a[t] = \sigma_a[t]$.
+
+For component `W` with a polynomial basis of degree $K$ and $d$ predictors, the effective coefficient at coordinate $j$ per draw $t$ is the linear contribution of the basis to the $j$-th column of `X` in $\eta$:
+
+$$\mathrm{eff}_W[t, j] = \sum_{k=1}^K \bigl(\theta_{\text{ref}}[t]^k - \theta_{\text{anchor}}^k\bigr)\,W_{\text{raw}}[t, k, j]\,\sigma_W[t],$$
+
+with the per-draw reference scale being the conditional prior standard deviation of $\mathrm{eff}_W[t, j]$ given the hyperparameters at draw $t$:
+
+$$\mathrm{ref}_W[t] = \sigma_W[t]\,\sqrt{\sum_{k=1}^K \bigl(\theta_{\text{ref}}[t]^k - \theta_{\text{anchor}}^k\bigr)^2}.$$
+
+### **3.3.2. Log info ratio and block bootstrap**
+
+Per coordinate $j$, the log info ratio on the full pre-flight sample is
+
+$$\widehat{\ell}_j = \log\!\left(\frac{\overline{\mathrm{ref}}}{\widehat{\mathrm{sd}}(\mathrm{eff}_{\cdot, j})}\right),$$
+
+and the statistic averaged across coordinates is $\widehat{m} = \overline{\widehat\ell}$. The standard error of $\widehat{m}$ is estimated by a chain-aware block bootstrap: within each chain, blocks of 10 contiguous draws are resampled with replacement, and the statistic is recomputed; the bootstrap standard deviation across $B = 200$ replicates gives $\widehat{\mathrm{SE}}(\widehat{m})$. The chain-aware design preserves the local MCMC autocorrelation that an iid bootstrap would erase, yielding a more honest (typically larger) standard error.
+
+### **3.3.3. Z-tests and thresholds**
+
+Two asymptotic z-tests are applied against null hypotheses on the log info ratio:
+
+$$z_{\text{cp}} = \frac{\widehat{m} - \log \tau_{\text{cp}}}{\widehat{\mathrm{SE}}(\widehat{m})}, \qquad z_{\text{ncp}} = \frac{\widehat{m} - \log \tau_{\text{ncp}}}{\widehat{\mathrm{SE}}(\widehat{m})}.$$
+
+Decision rule (one-sided, $\alpha = 0.025$, critical value $z^* \approx 1.96$):
+
+- $z_{\text{cp}} > z^*$: declare CP, reason `filter_info_high`.
+- $z_{\text{ncp}} < -z^*$: declare NCP, reason `filter_info_low`.
+- Otherwise: declare NCP, reason `filter_info_ambiguous_ncp` (conservative).
+
+Default thresholds (as of 2026-05-10) are $\tau_{\text{cp}} = 5$ and $\tau_{\text{ncp}} = 2$, calibrated against eight canonical scenarios in `inst/benchmarks/calibrate_cp_ncp.R`. The benchmark achieves overall hit rate 0.92 against the well-defined scenarios; the single residual miss is attributable to structural confounding (Section 7), not to a threshold defect.
+
+---
+
+# **4. Introspecting the decision**
+
+After fitting, the resolved parametrization and the pre-flight metadata are stored at `fit$parametrization`:
+
+```r
+fit$parametrization$cp_a          # logical: was CP chosen for a?
+fit$parametrization$cp_W          # logical: was CP chosen for W?
+fit$parametrization$meta          # list with diagnostic statistics
+```
+
+The `meta` list contains:
+
+| Field | Meaning |
+|---|---|
+| `used_preflight` | Logical. `TRUE` when the pre-flight ran (i.e., at least one component needed a data-driven decision). |
+| `n_divergent` | Integer. Divergent transitions in the pre-flight. |
+| `div_pct` | Numeric. Proportion of divergent transitions. |
+| `ebfmi_min` | Numeric. Minimum E-BFMI across pre-flight chains. |
+| `t_attribution_a`, `t_attribution_W` | Numeric. Filter 4 t-statistic per component (`NA` if filter 4 did not run for that component). |
+| `t_info_cp_a`, `t_info_ncp_a` | Numeric. Filter 6 z-statistics for component `a` against $\tau_{\text{cp}}$ and $\tau_{\text{ncp}}$. |
+| `t_info_cp_W`, `t_info_ncp_W` | Numeric. Same for component `W`. |
+| `decision_reason_a`, `decision_reason_W` | Character. Reason code per component (see below). |
+
+Reason codes:
+
+| Code | Meaning |
+|---|---|
+| `user_global` | The user passed `parametrization = "ncp"` or `"cp"`; pre-flight skipped. |
+| `user_explicit_a` / `user_explicit_W` | The user passed an explicit per-component override. |
+| `absent_or_degenerate` | The component is not declared in `amm_spec` or its dimension is degenerate. |
+| `filter_attribution` | Filter 4 rejected; CP forced. |
+| `filter_ebfmi` | Filter 5 fired; CP forced. |
+| `filter_info_high` | Filter 6 rejected against $\tau_{\text{cp}}$; CP chosen. |
+| `filter_info_low` | Filter 6 rejected against $\tau_{\text{ncp}}$; NCP chosen. |
+| `filter_info_ambiguous_ncp` | Filter 6 did not reach either threshold; NCP chosen conservatively. |
+| `filter_info_undefined_ncp` | Filter 6 returned `NA` (degenerate inputs); NCP chosen conservatively. |
+
+---
+
+# **5. Worked example**
+
+A minimal Gaussian fit with `parametrization = "auto"`. The data are simulated under a regime that should land on `filter_info_high` for `a`: large beta coefficients with low residual noise, n = 80.
+
+```{r example-fit, eval=have_cmdstan}
+library(gdpar)
+
+set.seed(1)
+n <- 80L
+df <- data.frame(
+  x1 = rnorm(n), x2 = rnorm(n), x3 = rnorm(n)
+)
+df$y <- 1 + 0.8*df$x1 - 0.6*df$x2 + 0.4*df$x3 +
+        rnorm(n, sd = 0.3)
+
+spec <- amm_spec(a = ~ x1 + x2 + x3)
+
+fit <- gdpar(
+  formula       = y ~ x1 + x2 + x3,
+  family        = gdpar_family("gaussian"),
+  amm           = spec,
+  data          = df,
+  parametrization = "auto",
+  iter_warmup   = 300L,
+  iter_sampling = 300L,
+  chains        = 2L,
+  refresh       = 0L,
+  verbose       = FALSE,
+  seed          = 42L
+)
+```
+
+Inspect the resolved parametrization:
+
+```{r example-resolved, eval=have_cmdstan}
+fit$parametrization$cp_a
+fit$parametrization$cp_W
+```
+
+Inspect the pre-flight metadata:
+
+```{r example-meta, eval=have_cmdstan}
+str(fit$parametrization$meta)
+```
+
+The relevant fields for a high-information regime are `decision_reason_a` (expected `"filter_info_high"`) and the z-statistic `t_info_cp_a` (expected to exceed 1.96). In this configuration `W` is absent from the spec, so `decision_reason_W` is `"absent_or_degenerate"`.
+
+```{r example-decision, eval=have_cmdstan}
+fit$parametrization$meta$decision_reason_a
+fit$parametrization$meta$t_info_cp_a
+fit$parametrization$meta$n_divergent
+fit$parametrization$meta$ebfmi_min
+```
+
+---
+
+# **6. Known limitations**
+
+## **6.1. Confounding between `a` and `W` when covariates overlap**
+
+When `a` and `W` share predictors in `x_vars`, the marginal posterior of the effective `W` coefficient is genuinely wider because data variability is split between the two components. Filter 6 reads this as "low information" and recommends NCP — which is statistically the correct choice given the marginal geometry, even when the true generating coefficients are large. The user-facing implication is that under confounding, `decision_reason_W` may be `filter_info_low` or `filter_info_ambiguous_ncp` even in regimes with strong signal. This is documented behavior, not a defect.
+
+If you have prior knowledge that `W` is informative despite the confounding, override with `parametrization_W = "cp"` explicitly.
+
+## **6.2. Identifiability of individual basis components of `W`**
+
+The Stan model evaluates `W` at the scalar `theta_ref`, so the data linearly identify only one combination per coordinate: $\sum_k (\theta_{\text{ref}}^k - \theta_{\text{anchor}}^k)\,W_{\text{raw}}[k, j]$. Individual `W_raw[k, j]` for different $k$ at the same $j$ are not separately identified beyond what the prior implies. Path B' addresses this by computing the info ratio on the *effective* coefficient (the sum across $k$) rather than on individual `W_raw[k, j]`, which is the correct identifiable quantity to measure.
+
+## **6.3. Block bootstrap versus naive bootstrap**
+
+The chain-aware block bootstrap (block size 10) is conservative: it preserves local MCMC autocorrelation that an iid bootstrap would erase, yielding a typically larger standard error and a more demanding rejection criterion. Users who want to experiment with different block sizes can call `gdpar:::preflight_info_ratio_t()` directly with custom `block_size` and `n_boot` arguments, but this is an internal API not covered by stability guarantees.
+
+## **6.4. Pre-flight wall-time cost**
+
+The pre-flight adds approximately 30% wall-time per `gdpar()` call (one compilation, one short fit with 200 warmup + 200 sampling, 2 chains, `adapt_delta = 0.95`, `max_treedepth = 10`). In production pipelines where this cost is unacceptable, run `parametrization = "auto"` once during prototyping, record the resolved decision, and pass it explicitly via `parametrization_a` / `parametrization_W` in subsequent calls.
+
+---
+
+# **7. Summary recommendations**
+
+- **Start with `parametrization = "auto"`.** It costs ~30% extra wall-time but removes a manual decision.
+- **Inspect `fit$parametrization$meta` after the fit** to learn how the decision was made; the reason code points directly to the active filter.
+- **Override with explicit `parametrization_a` / `parametrization_W`** when you have prior knowledge (especially under confounding), when calibrating across configurations, or when the pre-flight cost is unacceptable.
+- **Default thresholds $\tau_{\text{cp}} = 5$, $\tau_{\text{ncp}} = 2$** are empirically calibrated against the eight canonical scenarios; in domain-specific applications you can tune them via `inst/benchmarks/calibrate_cp_ncp.R`.
+
+---
+
+# **References**
+
+- `vignette("v01_amm_identifiability", package = "gdpar")` — canonical form and identifiability conditions.
+- `vignette("v04_asymptotics_path1_bayesian", package = "gdpar")` — asymptotic theory of Path 1.
+- Stan Development Team (2024). *Stan User's Guide*, version 2.35. <https://mc-stan.org/docs/stan-users-guide/>
+- Betancourt, M. and Girolami, M. (2015). Hamiltonian Monte Carlo for hierarchical models. *Current Trends in Bayesian Methodology with Applications*, CRC Press.
+- Künsch, H. R. (1989). The jackknife and the bootstrap for general stationary observations. *The Annals of Statistics*, 17(3), 1217-1241. (Block bootstrap.)

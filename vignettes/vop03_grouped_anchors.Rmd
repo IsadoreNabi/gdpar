@@ -1,0 +1,180 @@
+---
+title: "**Per-group hierarchical anchors: Operational Guide**"
+subtitle: "API, pre-flight (C7), coefficient summaries, and cross-group prediction (Block 6.5)"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Per-group hierarchical anchors: Operational Guide}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  collapse = TRUE, comment = "#>"
+)
+```
+
+---
+
+# **1. What this vignette covers**
+
+Block 6.5 promotes the population-level reference $\theta_{\text{ref}}$ of the AMM canonical decomposition
+
+$$\theta_i = \theta_{\text{ref}} + a(x_i) + b(x_i) \odot \theta_{\text{ref}} + W(\theta_{\text{ref}})\,x_i$$
+
+from a single global scalar (Block 6 default) to a per-group vector $\theta_{\text{ref}}[g]$, $g = 1, \ldots, J_{\text{groups}}$, sampled hierarchically from $\mathrm{Normal}(\mu_{\theta_{\text{ref}}}, \sigma_{\theta_{\text{ref}}})$ with both hyperparameters estimated. The model under grouping is
+
+$$\theta_i = \theta_{\text{ref}}[g_i] + a(x_i) + b(x_i) \odot \theta_{\text{ref}}[g_i] + W(\theta_{\text{ref}}[g_i])\,x_i, \qquad \theta_{\text{ref}}[g] \sim \mathrm{Normal}(\mu_{\theta_{\text{ref}}}, \sigma_{\theta_{\text{ref}}}),$$
+
+where $\odot$ denotes the Hadamard (elementwise) product, coherent with the canonical notation of `vignette("v00_framework_overview", package = "gdpar")` §8.2 and `vignette("v01_amm_identifiability", package = "gdpar")` §3.3.
+
+The user activates the grouping via the one-sided formula argument `group` of `gdpar()`. Default `group = NULL` reduces bit-exactly to the Block 6 scalar regime, so existing fits and tests do not change.
+
+This vignette documents:
+
+1. The `group` API and what changes inside the model.
+2. The pre-flight condition (C7) that prevents structural aliasing of the per-group anchor with `a` or `b`.
+3. The `coef()` schema under grouping: per-group anchors plus the population-level hyperparameters.
+4. The `predict()` semantics for newdata that contains levels unseen at fit time.
+5. The relationship with the parametrization toggle of `vop01_parametrization_toggle`.
+
+---
+
+# **2. API**
+
+## **2.1. The `group` argument**
+
+`group` is a one-sided formula identifying a single variable in `data`:
+
+```{r api_group, eval=FALSE}
+fit <- gdpar(
+  formula = y ~ x1 + x2,
+  family  = gdpar_family("gaussian"),
+  amm     = amm_spec(a = ~ x1 + x2),
+  data    = df,
+  group   = ~ school    # promotes theta_ref to per-school anchor
+)
+```
+
+Constraints accepted by the resolver `.resolve_group_argument()`:
+
+- One-sided formula with **exactly one variable name**. Examples: `~ school`, `~ region`. Expressions such as `~ school + region` are rejected; if you need an interaction, materialize it as a column beforehand: `df$cell <- interaction(df$school, df$region); gdpar(..., group = ~ cell)`.
+- The variable must exist in `data`, contain no NA values, and have at least one level. Internally it is coerced to a factor; the factor levels are stored in `fit$group_info$levels` and used later by `predict()` to map newdata.
+- The resolver emits an informational warning of class `gdpar_grouping_warning` when at least one level has fewer than 5 observations: the hierarchical anchor is then dominated by shrinkage and per-group summaries should be interpreted with caution.
+
+## **2.2. What changes inside the model**
+
+- Stan-side declaration. `vector[J_groups] theta_ref` (univariate) or `array[J_groups] vector[p] theta_ref` (multivariate), with `mu_theta_ref` and `sigma_theta_ref` allocated only when `use_groups = 1`. The model branch is the standard hierarchical prior `theta_ref[g] ~ Normal(mu_theta_ref, sigma_theta_ref)` with weakly informative hyperpriors (default `normal(0, 2.5)` on `mu_theta_ref` and `student_t(3, 0, 1)` on `sigma_theta_ref`).
+- Derived quantities. The `b_coef = c_b / theta_ref` derived quantity is **not reported** when `use_groups = 1`, because it would be ambiguous per group (different denominator per row). The structurally identified `c_b` is sampled and reported instead; users can derive `b_coef[j, g] = c_b[j] / theta_ref[g, k]` post-hoc per group if they need to.
+- Prior schema. `gdpar_prior(sigma_theta_ref = "student_t(3, 0, 1)")` is the new hyperprior knob; the existing `theta_ref` prior now applies to `mu_theta_ref` under grouping (and stays applied to the scalar `theta_ref` when `group = NULL`).
+
+---
+
+# **3. Pre-flight condition (C7)**
+
+When `group` is supplied, the pre-flight check `.check_group_aliasing_c7()` runs in addition to the standard Block 1 identifiability check. It enforces that neither `a` nor `b` contains columns that are linearly dependent with the group indicator $G$. The check has two layers:
+
+1. **Constant-per-group detection.** Any column of $Z_a$ or $Z_b$ that is constant within every level of `group` is rank-deficient with $G$ and creates a perfect alias with $\theta_{\text{ref}}[g]$. This catches the most frequent mistake: including `factor(group)` (or any deterministic function of `group`) in `a` or `b`.
+2. **Joint QR rank check.** For the centered design block $Z$, form $[G \mid Z]$, normalize column-wise, and verify $\mathrm{rank}([G \mid Z]) = \mathrm{ncol}([G \mid Z])$. This catches indirect aliases that the per-column check misses (a non-trivial linear combination of $Z$ columns matching a column of $G$).
+
+On violation, `gdpar()` aborts with `gdpar_input_error` naming the offending columns. The user either removes them from the AMM spec or drops the `group` argument.
+
+Defense in depth: the standard Block 1 identifiability check (`gdpar_check_identifiability()`) frequently catches the direct `factor(group)` case before C7 even runs, because $Z_a$ centered is rank-deficient with the implicit intercept that the model carries via $\theta_{\text{ref}}$. C7 covers the residual subtler aliases.
+
+See `vignette("v01_amm_identifiability", package = "gdpar")` Section 6.6.2 for the formal statement and proofs.
+
+---
+
+# **4. Coefficient summary under grouping**
+
+`coef(fit)` returns an object of class `gdpar_coef` with the following slots when `use_groups = 1`:
+
+- `theta_ref`: data.frame with columns `(g, k, mean, q05, q50, q95)`. One row per `(group, coordinate)`. In the univariate case (`p = 1`), `k` is constant at `1`. The factor levels are stored in `fit$group_info$levels` for the mapping `g <-> name`.
+- `mu_theta_ref`: data.frame with columns `(k, mean, q05, q50, q95)`. One row per coordinate. The population-level mean of the per-group anchors.
+- `sigma_theta_ref`: data.frame with columns `(k, mean, q05, q50, q95)`. Same shape. The population-level scale.
+- `a`, `b`, `W`: unchanged from Block 6.
+
+Under `use_groups = 0` (default), the `theta_ref` data.frame keeps the Block 6 columns `(k, mean, q05, q50, q95)` without `g`, preserving backward compatibility bit-exactly.
+
+`as.data.frame(coef(fit))` returns a long-tidy table that always includes the `g` column (NA when grouping is inactive) plus rows tagged `component = "mu_theta_ref"` and `component = "sigma_theta_ref"` when present.
+
+Example (untested):
+
+```{r coef_example, eval=FALSE}
+cf <- coef(fit)
+cf$theta_ref          # one row per (g, k)
+cf$mu_theta_ref       # population-level mu
+cf$sigma_theta_ref    # population-level sigma
+as.data.frame(cf)     # long-tidy: component, g, k, identifier, x_name, mean, q05, q50, q95
+```
+
+The print method shows the population-level hyperparameter blocks first, followed by the per-group anchors and the per-component summaries.
+
+---
+
+# **5. Cross-group prediction**
+
+`predict(fit, newdata = new_df, ...)` under a grouped fit resolves `new_df[[var_name]]` against `fit$group_info$levels` to obtain the per-row group index:
+
+- **Known levels.** The corresponding posterior column `theta_ref[, g]` (or `theta_ref[, g, k]` in multivariate) is read draw by draw and used as $\theta_{\text{ref}}$.
+- **Unseen levels.** The function emits a `gdpar_predict_unseen_group_warning` naming the offending levels and, for each affected row, draws $\theta_{\text{ref}}$ from the **marginal prior predictive** $\mathrm{Normal}(\mu_{\theta_{\text{ref}}}[s], \sigma_{\theta_{\text{ref}}}[s])$ per posterior draw $s$ (and per coordinate $k$ in multivariate). The prediction is therefore well-defined but its uncertainty includes the population-level variance, not just the within-group variance.
+
+The newdata data.frame must contain the same grouping variable. If absent, `predict()` aborts with `gdpar_input_error`.
+
+The b-block of the predictor uses `c_b` directly under grouping (consistent with the Stan model that does not report `b_coef` per group). Mathematically the formula is the same as in Block 6 with `Z_b %*% c_b` replacing `Z_b %*% b_coef * theta_ref`, since `c_b = theta_ref * b_coef` by construction.
+
+Example (untested):
+
+```{r predict_example, eval=FALSE}
+new_df <- df[1:10, ]
+new_df$school <- factor(c(rep("school_A", 8), rep("new_school_X", 2)),
+                        levels = c(levels(df$school), "new_school_X"))
+# predict() emits a single warning naming "new_school_X" and uses the
+# prior predictive marginal for those two rows:
+pred <- predict(fit, newdata = new_df, summary = "draws")
+```
+
+---
+
+# **6. Interaction with the parametrization toggle**
+
+The parametrization toggle (`parametrization`, `parametrization_a`, `parametrization_W`) discussed in `vignette("vop01_parametrization_toggle", package = "gdpar")` is **orthogonal** to grouping: it controls the CP/NCP geometry of the hierarchical scales `sigma_a` and `sigma_W` on the basis coefficients, not the hierarchical scale `sigma_theta_ref` on the per-group anchors. The per-group anchor is always sampled from a standard random-intercept hierarchy without an additional CP/NCP toggle.
+
+In practice, when a fit shows divergences under grouping, the diagnostic order is:
+
+1. Confirm pre-flight (C7) is satisfied (otherwise the divergences are structural, not geometric).
+2. Inspect `fit$parametrization$meta` for the per-component CP/NCP decision; switch to the alternative parametrization with the standard toggle if `sigma_a` or `sigma_W` is the culprit.
+3. If the divergences persist and concentrate on `theta_ref[g]`, consider tightening `gdpar_prior(sigma_theta_ref = ...)`, since with very few observations per group the random-intercept funnel can be severe regardless of the per-component parametrization.
+
+---
+
+# **7. Reproducibility checklist**
+
+- The `group` argument is part of the call recorded in `fit$call`. Re-running the call with the same seed and the same `data` (including the same factor levels for the grouping variable) reproduces the fit bit-exactly.
+- `fit$group_info` stores the resolved metadata: `var_name`, `levels`, and `group_id` (the integer vector of length `n`). The mapping `g <-> name` is therefore portable across sessions through the saved `gdpar_fit` object.
+- `coef(fit)$group_levels` returns the same character vector, useful for plotting per-group anchors with the original labels.
+
+---
+
+# **8. See also**
+
+- `vignette("v01_amm_identifiability", package = "gdpar")` Section 6.6.2 for the formal statement of (C7).
+- `vignette("v03_special_cases", package = "gdpar")` Section 4.1 for the random-intercept canonization.
+- `vignette("vop01_parametrization_toggle", package = "gdpar")` for the CP/NCP toggle on the hierarchical scales of `a` and `W`.

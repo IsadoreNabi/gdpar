@@ -1,0 +1,432 @@
+---
+title: "**The Empirical-Bayes Workflow in gdpar**"
+subtitle: "Operational recipe: `gdpar_eb()` end-to-end, four path regimes, EB-vs-FB comparison and troubleshooting (Sub-phase 8.6.E)"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{The Empirical-Bayes Workflow in gdpar}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  collapse = TRUE, comment = "#>",
+  eval = FALSE
+)
+```
+
+# **1. What this vignette covers**
+
+This is an operational recipe. It walks you through `gdpar_eb()` end
+to end across the four path regimes canonized in Sub-phase 8.6 of
+gdpar:
+
+| Regime  | $K$ | $p$ | Stan template pair                                        |
+|:--------|:---:|:---:|:----------------------------------------------------------|
+| Base    |  1  |  1  | `amm_eb_marginal.stan` + `amm_eb_conditional.stan`        |
+| Path A  |  1  | >1  | `amm_eb_marginal_multi.stan` + `amm_eb_conditional_multi.stan` |
+| Path B  | >1  |  1  | `amm_eb_marginal_K.stan` + `amm_eb_conditional_K.stan`    |
+| Path C  | >1  | >1  | `amm_eb_marginal_KxP.stan` + `amm_eb_conditional_KxP.stan`|
+
+It then shows how to compare an EB fit against a Fully-Bayes (FB) fit
+on the same data via `gdpar_compare_eb_fb()`, how to read the
+numerical diagnostics that surface when the marginal Hessian is
+poorly conditioned, and when to give up on EB and fall back to FB.
+
+The theoretical canonization of EB-vs-FB — the asymptotic
+equivalence (Theorem 7A and its multivariate extension Theorem 7A\*),
+the higher-order coverage discrepancy (Proposition 7B scalar /
+7B\* matricial / 7B\* tensorial), the finite-sample compound decision
+bound (Theorem 7C / 7C\* compound multi-slot), and the four
+discrepancy conditions of Proposition 7D — lives in the canonical
+vignettes `vignette("v07_eb_vs_fb")` (scalar) and
+`vignette("v07b_eb_multivariate")` (multivariate extension). Read
+those if you want to know *why* a given choice was made; read this
+one if you want to *do* it.
+
+The chunks below default to `eval = FALSE` because they compile Stan
+models and take several minutes per fit; re-enable evaluation on a
+per-chunk basis or globally via `knitr::opts_chunk$set(eval = TRUE)`
+if you want to reproduce the runs locally.
+
+# **2. Setup**
+
+```{r packages}
+library(gdpar)
+# These two are Suggests; gdpar_eb() and gdpar_compare_eb_fb() require
+# them at runtime.
+library(cmdstanr)
+library(posterior)
+```
+
+We will work with a synthetic dataset of size `n = 150` on a single
+continuous outcome with one covariate, then enrich it to multivariate
+and multi-slot variants as we walk through the four regimes.
+
+```{r data}
+set.seed(20260526L)
+n  <- 150L
+df <- data.frame(x = stats::rnorm(n))
+df$y_scalar <- 1.0 + 0.4 * df$x + stats::rnorm(n, sd = 0.3)
+# Multivariate (p = 2) outcome for Path A.
+df$y_p2 <- cbind(
+  1.0 + 0.4 * df$x + stats::rnorm(n, sd = 0.3),
+  -0.5 + 0.2 * df$x + stats::rnorm(n, sd = 0.4)
+)
+# Same dataset is fine for Path B (K > 1, p = 1) and Path C (K > 1,
+# p > 1) by reusing y_scalar / y_p2 with a multi-slot family below.
+```
+
+# **3. Minimal `gdpar_eb()` call (K = 1 + p = 1)**
+
+The base regime mirrors the canonical `gdpar()` signature; the only
+new arguments are `eb_correction = TRUE` (default; applies the
+Proposition 7B scalar inflation to the conditional credible intervals)
+and `laplace_control = list(...)` (controls the multi-start Laplace
+maximizer of v07 Section 11.1 step (i)).
+
+```{r eb-base}
+fit_eb <- gdpar_eb(
+  formula        = y_scalar ~ x,
+  family         = gdpar_family("gaussian"),
+  amm            = amm_spec(a = ~ x),
+  data           = df,
+  iter_warmup    = 500L,
+  iter_sampling  = 500L,
+  chains         = 2L,
+  refresh        = 0L,
+  seed           = 1L,
+  laplace_control = list(multi_start_M = 5L)
+)
+print(fit_eb)
+```
+
+The output reports the EB plug-in point estimate
+$\widehat\theta_{\text{ref}}^{\text{EB}}$ (from the marginal Laplace),
+its marginal standard error from the Laplace covariance, the marginal
+Hessian condition number $\kappa(H)$, the multi-start dispersion
+across the `multi_start_M = 5` independent inits, and the conditional
+HMC convergence diagnostics ($\widehat R$, ESS, divergences).
+
+`summary(fit_eb)` returns a tidy table of EB credible intervals with
+the Proposition 7B scalar inflation applied:
+
+```{r eb-base-summary}
+summary(fit_eb)
+```
+
+# **4. Path A (K = 1, p > 1): multivariate outcome**
+
+For a $p$-dimensional outcome, the amm spec uses `dimwise()` (or a
+plain `list` of length $p$) to declare the per-coordinate components,
+and the family is promoted to a `gdpar_family_multi` of dimension
+$p$. The Stan template pair `amm_eb_marginal_multi.stan` +
+`amm_eb_conditional_multi.stan` (canonized in Sub-phase 8.6.C under
+decision D34) is dispatched automatically:
+
+```{r eb-path-A}
+fit_eb_A <- gdpar_eb(
+  formula        = y_p2 ~ x,
+  family         = gdpar_family_multi("gaussian", p = 2L),
+  amm            = amm_spec(p = 2L, dims = dimwise(a = ~ x)),
+  data           = df,
+  iter_warmup    = 500L,
+  iter_sampling  = 500L,
+  chains         = 2L,
+  refresh        = 0L,
+  seed           = 2L
+)
+print(fit_eb_A)
+```
+
+The corresponding correction is matricial, $C^*_{g,\alpha} \in
+\mathbb{R}^{p\times p}$ (Proposition 7B\* of v07b Section 5.1). It
+reduces algebraically to the scalar Proposition 7B at $p = 1$, so the
+upgrade from base to Path A is transparent.
+
+# **5. Path B (K > 1, p = 1): multi-parametric family**
+
+For a multi-slot distributional regression (e.g. modelling both `mu`
+and `sigma` of a Gaussian K=2, or `mu` and `phi` of a Negative
+Binomial K=2), the amm input is either a named list of `amm_spec`
+(one per slot) or a `gdpar_formula_set` via `gdpar_bf(...)`. The
+Stan template pair `amm_eb_marginal_K.stan` +
+`amm_eb_conditional_K.stan` is dispatched automatically:
+
+```{r eb-path-B}
+fs <- gdpar_bf(y_scalar ~ a(x), sigma ~ a(x))
+fit_eb_B <- gdpar_eb(
+  formula        = fs,
+  family         = gdpar_family("gaussian"),
+  data           = df,
+  iter_warmup    = 500L,
+  iter_sampling  = 500L,
+  chains         = 2L,
+  refresh        = 0L,
+  seed           = 3L,
+  skip_id_check  = TRUE
+)
+print(fit_eb_B)
+```
+
+Coverage of stan_ids per Sub-phase 8.6.C decision D33 (relaxed):
+`{1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13}` — Gaussian, Negative
+Binomial, Beta, Gamma, Lognormal-loc-scale, Student-t, Tweedie, ZIP,
+ZINB, Hurdle-Poisson, Hurdle-NB.
+
+# **6. Path C (K > 1, p > 1): full K x p extension**
+
+Path C, canonized in Sub-phase 8.6.D under decision D36 = (alpha) +
+D37 = (i) + D38'' = (h), composes Path A coordinate-wise
+factorization with Path B multi-parametric K-slot semantics: a single
+outcome matrix-column `y[n, p]` is shared across the K distributional
+slots, each carrying its own per-coordinate linear predictor.
+
+The initial 8.6.D iteration restricts Path C to
+`family$stan_id %in% c(1, 3)` (Gaussian K=2, NB K=2) under decision
+D40' to avoid the numerical caveat of Section 6.1 of the opening
+handoff (HMC condicional bajo plug-in EB cerca del borde de soporte
+logit/log links + warmup corto). Beta / Gamma / Lognormal /
+Student-t / Tweedie / mixtures are deferred to a later iteration.
+
+```{r eb-path-C}
+y_p2_int <- matrix(
+  rnbinom(n * 2L, size = 5, mu = exp(0.5 + 0.2 * df$x)),
+  n, 2L
+)
+df$y_p2_int <- y_p2_int
+fit_eb_C <- gdpar_eb(
+  formula        = y_p2_int ~ x,
+  family         = gdpar_family("neg_binomial_2"),
+  amm            = list(
+    mu  = amm_spec(p = 2L, dims = dimwise(a = ~ x)),
+    phi = amm_spec(p = 2L, dims = dimwise(a = ~ x))
+  ),
+  data           = df,
+  iter_warmup    = 500L,
+  iter_sampling  = 500L,
+  chains         = 2L,
+  refresh        = 0L,
+  seed           = 4L,
+  skip_id_check  = TRUE
+)
+print(fit_eb_C)
+```
+
+The fit object carries new Path C-specific slots:
+
+- `theta_ref_kp_hat`: 3D numeric array of shape `[J_groups, K, p]`.
+- `theta_ref_kp_se`: same shape; per-coordinate marginal standard
+  errors derived from each slot's Laplace covariance block.
+- `theta_ref_kp_cov_per_slot`: named list of `K` matrices each
+  `p × p`; the per-slot blocks of the joint Laplace covariance after
+  the block-diagonal extraction of decision D43 = (a).
+- `correction_tensor_constant`: 3D array of shape `[K, p, p]` with
+  the Proposition 7B\* tensor correction of decision D37 = (i).
+- `correction_tensor_dispositions`: named character vector reporting
+  whether each slot's correction was applied (`"ok"`),
+  `"non_finite"`, `"non_psd"`, `"missing"`, or `"disabled"`.
+
+# **7. Numerical diagnostics: how to read them**
+
+Every `gdpar_eb_fit` carries a `diagnostics_numerical` slot with
+four entries derived from the multi-start Laplace strategy of
+Charter Section 2.8:
+
+- `kappa` (base regime / Path A / Path B) or `kappa_per_slot` (Path C):
+  the condition number of the marginal Hessian at the chosen MAP. The
+  guard `laplace_control$kappa_threshold` (default `1e10`) aborts the
+  fit with `gdpar_eb_numerical_error` when exceeded. A `kappa` between
+  `1e6` and `1e9` is a warning sign; consider tightening the prior
+  on `theta_ref` or moving the anchor closer to the data via
+  `anchor = "empirical_y"`.
+
+- `lm_perturbation`: the Levenberg-Marquardt ridge actually added to
+  the marginal covariance when the bare Hessian was singular or
+  non-PSD. A non-zero value means the Laplace approximation needed
+  numerical stabilization; the result is still valid but the
+  effective sample size for the EB anchor is smaller than the nominal
+  Laplace draws would suggest.
+
+- `multi_start_dispersion`: standard deviation of the log marginal
+  across the `multi_start_M` independent inits, normalized by the
+  absolute mean. A value above `0.05` triggers a diagnostic warning
+  because it suggests multi-modality of the marginal likelihood (open
+  question O5\*-EBFB of v07b Section 9.5). Consider raising
+  `multi_start_M` from the default 5 to 10–20 to stress-test the
+  optimum.
+
+- `marginal_log_lik_history`: the per-init log marginal achieved by
+  each `optimize()` call. Useful for forensics when the dispersion is
+  large.
+
+# **8. EB vs FB comparison via `gdpar_compare_eb_fb()`**
+
+The companion function `gdpar_compare_eb_fb()` (canonized in
+Sub-phase 8.6.E) takes a `gdpar_eb_fit` and a `gdpar_fit` fitted on
+the same dataset and reports three operational diagnostics of the
+EB-vs-FB theory of v07:
+
+```{r compare-eb-fb}
+fit_fb <- gdpar(
+  formula        = y_scalar ~ x,
+  family         = gdpar_family("gaussian"),
+  amm            = amm_spec(a = ~ x),
+  data           = df,
+  iter_warmup    = 500L,
+  iter_sampling  = 500L,
+  chains         = 2L,
+  refresh        = 0L,
+  seed           = 1L
+)
+cmp <- gdpar_compare_eb_fb(fit_eb, fit_fb, level = 0.95,
+                            tv_bins = 30L)
+print(cmp)
+summary(cmp)
+```
+
+The output carries three tables:
+
+- `theta_diff_table`: per-anchor cell comparison of
+  $\widehat\theta_{\text{ref}}^{\text{EB}}$ and the FB posterior mean
+  $E_{\text{FB}}[\theta_{\text{ref}}]$, with the difference and the
+  difference normalized by the FB standard error. Under the standing
+  hypotheses of v07 Section 4 (EB-MARG-ID + PRIOR-FB-WEAK +
+  HIER-COMPLEX), Theorem 7A predicts `diff_rel` close to zero up to
+  $O(n^{-1/2})$.
+
+- `tv_table`: marginal empirical total variation distance per
+  common $\xi$ parameter, computed via histogram plug-in over the
+  shared support. Under Theorem 7A, marginal TV $\to 0$ in
+  probability as $n \to \infty$. A persistent large TV across many
+  parameters suggests one of the discrepancy conditions of
+  Proposition 7D (multi-modality of the marginal likelihood,
+  near-singular Fisher information, informative prior, deep
+  hierarchy).
+
+- `coverage_table`: per anchor cell, the EB credible interval width
+  (with inflation applied when `eb_correction = TRUE`), the FB
+  credible interval width, and the ratio `width_eb / width_fb`. This
+  operationally verifies the $O(n^{-1})$ under-cover prediction of
+  Proposition 7B (and its matricial / tensorial extensions). A ratio
+  systematically below 1 confirms the EB under-cover; a ratio above
+  1 after correction suggests the inflation is over-correcting,
+  which is acceptable in finite samples and consistent with the
+  asymptotic guarantee.
+
+# **9. Troubleshooting**
+
+## 9.1. `gdpar_eb_numerical_error: kappa = ...`
+
+The marginal Hessian is too ill-conditioned for Laplace to be
+reliable. Options:
+
+1. Tighten the prior on `theta_ref` via a stronger
+   `gdpar_prior(theta_ref = "normal(0, 0.5)")`.
+2. Move the anchor closer to the data via
+   `anchor = "empirical_y"`.
+3. Raise `laplace_control$multi_start_M` and rerun (the per-init
+   seed offset will sample different unconstrained-space inits).
+4. Fall back to FB via `gdpar()` (the most reliable option when the
+   marginal likelihood is genuinely flat).
+
+## 9.2. `gdpar_unsupported_feature_error` on Path C
+
+The initial 8.6.D iteration restricts Path C to
+`family$stan_id %in% c(1, 3)` (Gaussian K=2, NB K=2) per decision
+D40'. For other distributional families under $K > 1 \wedge p > 1$,
+fall back to FB via `gdpar()` or split the multivariate outcome into
+$p$ separate Path B fits as a workaround.
+
+## 9.3. Multi-start dispersion warning
+
+A `multi_start_dispersion` above 0.05 suggests multi-modality of the
+marginal likelihood (open question O5\*-EBFB of v07b Section 9.5).
+The result returned by `gdpar_eb()` is the mode with the highest log
+marginal across the `multi_start_M` inits, which may differ from the
+mode picked by a single run. Options:
+
+1. Raise `multi_start_M` from the default 5 to 10–20.
+2. Use a stronger prior on `theta_ref` to break the multi-modality.
+3. Fall back to FB; HMC explores multi-modal posteriors better than
+   single-mode Laplace.
+
+## 9.4. Path B conditional HMC instability under `logit`-strict links
+
+Path B with strict $(0, 1)$ inverse-link families (Beta, Bernoulli)
+can exhibit conditional HMC instability when the EB plug-in anchor
+falls near the support boundary and the HMC warmup is short. The
+caveat is documented in the closure of Sub-phase 8.6.C
+(`HANDOFF_SUBFASE_8_6_C_CIERRE.md` Section 3.3). Workarounds:
+
+1. Raise `iter_warmup` to 1000 or more.
+2. Use a tighter prior on `sigma_a_k` (the HMC has fewer chances to
+   sample large `a_coef_k` values that saturate the logit).
+3. Use `anchor = "prior_median"` or an explicit numeric anchor that
+   keeps the EB plug-in in the interior of the support.
+
+## 9.5. Path C smoke validation
+
+A representative end-to-end Path C smoke (Gaussian K=2 + p=2,
+$n = 80$, `iter_warmup = iter_sampling = 200L`, `chains = 2L`)
+takes approximately 50 seconds on contemporary hardware
+(`amm_eb_marginal_KxP.stan` and `amm_eb_conditional_KxP.stan` each
+compile once and are cached by cmdstanr). If the smoke takes
+significantly longer or aborts with `gdpar_eb_numerical_error`, the
+geometry of the K × p marginal is likely the culprit; check
+`kappa_per_slot` and the slot dispositions returned by the
+correction tensor.
+
+# **10. Where to go next**
+
+- For the theoretical canonization of EB-vs-FB at the scalar level,
+  read `vignette("v07_eb_vs_fb")`.
+- For the multivariate / multi-slot extension of the theory (Theorem
+  7A\*, Proposition 7B\*, Theorem 7C\* compound multi-slot, open
+  question O5\*-EBFB), read `vignette("v07b_eb_multivariate")`.
+- For the AMM canonization on which both EB and FB operate, read
+  the AMM family of canonical vignettes (v01–v06).
+- For CATE / ITE applications and the EB-vs-FB shrinkage discussion
+  in the context of heterogeneous treatment effects, read
+  `vignette("v08_amm_for_cate_ite_positioning")` and the
+  implementation vignettes `v08b_cate_ite_bridge_implementation`
+  and `v08c_meta_learner_comparison`.
+- If your data are dependent — **temporally** (a time series) or
+  **spatially** — the EB posterior understates uncertainty because the
+  likelihood assumes conditional independence. Measure the violation
+  with `gdpar_dependence_diagnostic()` (lag-1 autocorrelation,
+  Durbin-Watson, Ljung-Box) or its spatial sibling
+  `gdpar_spatial_dependence_diagnostic()` (Moran's I), and obtain
+  dependence-robust standard errors and percentile intervals with
+  `gdpar_dependence_robust()` (temporal block bootstrap) or
+  `gdpar_spatial_dependence_robust()` (spatial block bootstrap), Block
+  9, Axis 2. This makes the *uncertainty* robust to dependence; gdpar
+  does not *model* the dependence. The full recipe is in
+  `vignette("vop09_dependence_robust")`.
+
+# **References**
+
+The canonical theoretical references for EB-vs-FB in the AMM are
+Petrone, Rousseau, and Scricciolo (2014) and Rousseau and Szabo
+(2017) for the asymptotic equivalence and merging results; Carlin
+and Gelfand (1990) for the higher-order coverage discrepancy and the
+inflation correction; and Robbins (1956) / Efron (2010) for the
+compound decision framework. Full bibliographic details are in
+`vignette("v07_eb_vs_fb")` Section "References Cited in This Block".

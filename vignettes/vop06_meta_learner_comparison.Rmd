@@ -1,0 +1,366 @@
+---
+title: "**Comparing the AMM-side T-learner against External Meta-learners**"
+subtitle: "Operational recipe: `grf` R-side and EconML Python-side adapters (Sub-phase 8.5.B)"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Comparing the AMM-side T-learner against External Meta-learners}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  collapse = TRUE, comment = "#>"
+)
+```
+
+# **1. What this vignette covers**
+
+This is an operational recipe. It walks you through `gdpar_compare_meta_learners()`
+end to end with two reference adapters: `gdpar_adapter_grf()` (R-side,
+based on the `grf` package) and `gdpar_adapter_econml()` (Python-side,
+based on the `econml` library via `reticulate`). It also shows how to
+extend the comparator by writing your own adapter, using `DoubleML` as
+the worked example, and ends with troubleshooting for the
+Python-side path.
+
+The theoretical canonization of the comparator — definitions, the
+adapter contract, the concordance criterion, identifiability per arm
+under cross-method comparison, and the limits of the exercise — lives
+in the companion canonical vignette
+`vignette("v08c_meta_learner_comparison")`. Read that one if you want
+to know *why* a given choice was made; read this one if you want to
+*do* it.
+
+We assume you have a `gdpar_causal_bridge` already built from a pair
+of `gdpar_fit` objects (one per arm). If you are new to the bridge,
+see `vignette("v08b_cate_ite_bridge_implementation")` first.
+
+---
+
+# **2. Setup**
+
+Synthetic data, two arms, two fits, one bridge. The example is
+deliberately small so the chunk runs in a few seconds.
+
+```{r setup-data, eval = FALSE}
+library(gdpar)
+set.seed(2026L)
+n <- 300L
+
+df <- data.frame(x1 = rnorm(2L * n))
+df$arm <- rep(c("treat", "ctrl"), each = n)
+df$y <- with(df, ifelse(arm == "treat", 0.5, 0) +
+                 0.8 * x1 +
+                 rnorm(2L * n, sd = 0.5))
+df_t <- subset(df, arm == "treat"); df_t$arm <- NULL
+df_c <- subset(df, arm == "ctrl");  df_c$arm <- NULL
+
+fit_t <- gdpar(y ~ x1, amm = amm_spec(a = ~ x1), data = df_t,
+               iter_warmup = 300, iter_sampling = 300, chains = 2)
+fit_c <- gdpar(y ~ x1, amm = amm_spec(a = ~ x1), data = df_c,
+               iter_warmup = 300, iter_sampling = 300, chains = 2)
+
+newdata <- data.frame(x1 = seq(-2, 2, length.out = 21L))
+bridge <- gdpar_causal_bridge(fit_t, fit_c, newdata = newdata)
+```
+
+From here on we have a `bridge` of class `gdpar_causal_bridge`. The
+comparator takes that object and a list of adapters and never touches
+the two fits again.
+
+---
+
+# **3. The `grf` adapter in three lines**
+
+`grf` is in `Suggests`. The adapter is constructed with
+`gdpar_adapter_grf()`; you only need to pass the hyperparameters you
+want to override. Sensible defaults match `grf`'s own defaults
+(`num_trees = 2000L`, honesty on).
+
+```{r grf-quick, eval = FALSE}
+adapter_grf <- gdpar_adapter_grf(num_trees = 500L, seed = 2026L)
+cmp <- gdpar_compare_meta_learners(
+  bridge,
+  methods = list(grf = adapter_grf)
+)
+print(cmp)
+summary(cmp)
+```
+
+What you should see in `print(cmp)`:
+
+- A line per method (only `grf` here) with `native_ci = TRUE`,
+  the wall-clock time, and `predict = TRUE` (the adapter exposes
+  `predict_fun`, so re-evaluating on a fresh grid does not refit).
+- Three small concordance matrices indexed by `bridge` and `grf`:
+  RMSE, Pearson, MAD.
+
+If you want to re-evaluate the comparison on a fresh grid without
+refitting `grf`:
+
+```{r grf-predict, eval = FALSE}
+newdata2 <- data.frame(x1 = seq(-1.5, 1.5, length.out = 15L))
+cmp_new  <- predict(cmp, newdata = newdata2)
+```
+
+`predict.gdpar_meta_learner_comparison` reuses the cached `state`
+inside `cmp$external$grf$state` (the fitted `grf::causal_forest`
+object). The bridge is re-evaluated on `newdata2` via the embedded
+`gdpar_causal_bridge` and the new concordance matrices are recomputed.
+
+---
+
+# **4. The EconML adapter**
+
+`reticulate` and the Python module `econml` are both optional.
+`reticulate` is in `Suggests`; `econml` is a Python package that lives
+in your active Python environment. The package does not install Python
+dependencies on your behalf.
+
+## **4.1. One-time installation**
+
+The recommended flow:
+
+```{r econml-install, eval = FALSE}
+# 1. Install reticulate (R-side) if absent.
+install.packages("reticulate")
+
+# 2. Register econml as a Python requirement, then install it.
+reticulate::py_require("econml")  # reticulate 1.46+ ephemeral-env style
+reticulate::py_install("econml")  # adds econml to the active env
+
+# 3. Verify.
+reticulate::py_module_available("econml")  # should be TRUE
+```
+
+The `py_require` call is a no-op on reticulate releases that predate
+the ephemeral-env management; on 1.46 and later it tells reticulate
+which Python module to pin in the active uv-managed environment.
+`py_install` then performs the actual installation when needed.
+
+If you maintain a virtualenv or conda env explicitly, install
+`econml` in it with `pip install econml` or
+`conda install -c conda-forge econml` and point `reticulate` to it
+via `RETICULATE_PYTHON` or `reticulate::use_virtualenv()` / `use_condaenv()`.
+
+## **4.2. Running the EconML adapter**
+
+Once the Python module is available, the adapter is constructed
+exactly like the `grf` one:
+
+```{r econml-use, eval = FALSE}
+adapter_econml <- gdpar_adapter_econml(n_estimators = 500L, seed = 2026L)
+cmp2 <- gdpar_compare_meta_learners(
+  bridge,
+  methods = list(grf    = adapter_grf,
+                 econml = adapter_econml)
+)
+print(cmp2)
+summary(cmp2)
+```
+
+The concordance matrices now have three rows / columns (`bridge`,
+`grf`, `econml`). Both adapters expose `predict_fun`, so
+`predict(cmp2, newdata = newdata_fresh)` reuses both cached states
+without refitting either model.
+
+## **4.3. Caveat: serialization of the EconML state**
+
+The `state` slot for the EconML adapter holds a reference to a Python
+object managed by `reticulate`. The reference is valid for the
+duration of the R session in which the comparison was built;
+`saveRDS(cmp2, file = ...)` and a fresh-session `readRDS` will lose
+that reference, and a subsequent call to `predict(cmp2_restored, ...)`
+aborts cleanly with `gdpar_unsupported_feature_error`. Either re-fit
+in the new session or build the comparison there from scratch. The
+`grf` state survives serialization without modification.
+
+---
+
+# **5. Reading the output**
+
+The print method emits four blocks:
+
+```
+<gdpar_meta_learner_comparison>
+  n_obs                : <number of evaluation rows>
+  n_methods (external) : <length of methods>
+  level                : <inherited from bridge>
+  methods              :
+    - grf            native_ci = TRUE  time = ...  notes = 0  predict = TRUE
+    - econml         native_ci = TRUE  time = ...  notes = 0  predict = TRUE
+
+  concordance matrices (m-by-m, m = 1 + n_methods):
+    RMSE: <symmetric m-by-m matrix>
+    Pearson: <symmetric m-by-m matrix>
+    MAD: <symmetric m-by-m matrix>
+```
+
+- A small RMSE between `bridge` and an external method indicates
+  point-estimate agreement on `cate_mean` across the evaluation grid.
+- A high Pearson with small RMSE means the two methods agree both in
+  shape and in absolute scale. A high Pearson with large RMSE means
+  the two methods agree on the shape of the CATE surface but disagree
+  on the level (e.g. one is shifted).
+- MAD is more robust than RMSE in the presence of a few outliers.
+
+The summary method (`summary(cmp)`) returns a structured object with
+three slots: `ate_table` (one row per method with the marginal ATE
+and CI bounds), `metrics` (the long-format version of the three
+matrices), `timing` (a per-method timing table). Use it for tables in
+reports.
+
+---
+
+# **6. Writing your own adapter (DoubleML as an example)**
+
+The contract of an adapter is two functions:
+
+- `fit_predict_fun(X, Y, T, X_newdata, level, seed_run)` returns
+  `list(cate_mean, cate_ci, state, notes)`.
+- `predict_fun(state, X_newdata, level)` (optional) returns
+  `list(cate_mean, cate_ci)`. When absent, `predict()` falls back to
+  `fit_predict_fun` and emits a `gdpar_diagnostic_warning`.
+
+A worked sketch with `DoubleML` (R-side; install with
+`install.packages("DoubleML")`):
+
+```{r doubleml-sketch, eval = FALSE}
+fit_predict_dml <- function(X, Y, T, X_newdata, level, seed_run) {
+  if (!requireNamespace("DoubleML", quietly = TRUE) ||
+      !requireNamespace("mlr3learners", quietly = TRUE)) {
+    stop("DoubleML and mlr3learners are required for this adapter.")
+  }
+  d <- cbind(X, Y = as.numeric(Y), T = as.integer(T))
+  dml_data <- DoubleML::DoubleMLData$new(d, y_col = "Y", d_cols = "T",
+                                          x_cols = setdiff(colnames(d),
+                                                            c("Y", "T")))
+  learner_g <- mlr3::lrn("regr.ranger", num.trees = 200L)
+  learner_m <- mlr3::lrn("classif.ranger", num.trees = 200L,
+                          predict_type = "prob")
+  model <- DoubleML::DoubleMLPLR$new(dml_data, ml_g = learner_g$clone(),
+                                      ml_m = learner_m$clone())
+  model$fit()
+  est <- as.numeric(model$coef)
+  est_se <- as.numeric(model$se)
+  z <- stats::qnorm(1 - (1 - level) / 2)
+  n_new <- nrow(X_newdata)
+  list(
+    cate_mean = rep(est, n_new),
+    cate_ci   = cbind(lower = rep(est - z * est_se, n_new),
+                       upper = rep(est + z * est_se, n_new)),
+    state     = list(model = model),
+    notes     = "DoubleMLPLR returns a single ATE coefficient; broadcast to a constant CATE."
+  )
+}
+
+predict_dml <- function(state, X_newdata, level) {
+  n_new <- nrow(X_newdata)
+  est <- as.numeric(state$model$coef)
+  est_se <- as.numeric(state$model$se)
+  z <- stats::qnorm(1 - (1 - level) / 2)
+  list(
+    cate_mean = rep(est, n_new),
+    cate_ci   = cbind(lower = rep(est - z * est_se, n_new),
+                       upper = rep(est + z * est_se, n_new))
+  )
+}
+
+adapter_dml <- gdpar_meta_learner_adapter(
+  name = "doubleml_plr",
+  fit_predict_fun = fit_predict_dml,
+  predict_fun = predict_dml,
+  requires_r = c("DoubleML", "mlr3", "mlr3learners"),
+  native_ci = TRUE,
+  description = "DoubleMLPLR (constant CATE; useful as a robust ATE benchmark)"
+)
+
+cmp_with_dml <- gdpar_compare_meta_learners(
+  bridge,
+  methods = list(grf = adapter_grf, dml = adapter_dml)
+)
+```
+
+A few notes on this sketch:
+
+- `DoubleMLPLR` returns a *single* coefficient (an ATE), so the
+  `cate_mean` is broadcast as a constant vector. That is honest: the
+  partially linear model does not estimate a heterogeneous effect.
+- If you want heterogeneity from `DoubleML`, use
+  `DoubleMLIRM` with an interactive design and post-process the
+  effect surface as you see fit; the contract is the same.
+- The `notes` slot is the right place to document such quirks; the
+  comparator surfaces it through `print()` and `summary()`.
+
+---
+
+# **7. Troubleshooting (Python-side)**
+
+A short catalogue of what tends to go wrong and what to do.
+
+**(a) `reticulate` not installed.** Install it with
+`install.packages("reticulate")`. The package itself is small;
+the heavy lifting is on the Python side.
+
+**(b) `econml` not available.** Run
+`reticulate::py_install("econml")`. On reticulate 1.46 and later,
+reticulate uses ephemeral environments managed by `uv`; you may
+need to call `reticulate::py_require("econml")` to pin the package
+in the active environment before any Python operation.
+
+**(c) Wrong Python detected.** Inspect `reticulate::py_config()` and
+override with `Sys.setenv(RETICULATE_PYTHON = "/path/to/python")`
+before loading reticulate, or use the explicit
+`reticulate::use_virtualenv(...)`. If you maintain a Conda
+environment, `reticulate::use_condaenv("name")` does the same.
+
+**(d) `numpy` complains about version conflicts.** Pin the numpy
+version your `econml` was built against:
+`reticulate::py_install("numpy==1.26.*", pip = TRUE)`. EconML 0.16
+is known to work with numpy 1.26.x as of mid-2026.
+
+**(e) Cached Python state lost after restart.** The Python objects
+inside `cmp$external$econml$state` do not survive R session
+restarts. Rebuild the comparison in the new session.
+
+**(f) Adapter aborts with `gdpar_missing_dependency_error`.** That
+error is the package's deliberate, structured signal that a
+`Suggests` package or a Python module is missing. The error
+message names the missing item; install it and rerun. The
+package never installs anything on your behalf.
+
+---
+
+# **8. Where to go next**
+
+- `vignette("v08c_meta_learner_comparison")` — the canonical
+  theoretical addendum (definitions, identification under
+  cross-method comparison, the concordance criterion, the limits of
+  the exercise, identifiability per arm under the bridge).
+- `vignette("v08b_cate_ite_bridge_implementation")` — the canonical
+  T-learner AMM-side bridge (the object you feed into the
+  comparator).
+- `vignette("v08_cate_ite_positioning")` — the positioning of the
+  package's CATE / ITE workflow within the meta-learner literature.
+
+---
+
+*End of Operational Vignette -- Sub-phase 8.5.B.*

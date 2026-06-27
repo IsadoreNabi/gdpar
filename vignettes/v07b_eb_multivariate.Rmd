@@ -1,0 +1,583 @@
+---
+title: "**Theoretical Addendum -- Block 7 (Multivariate Extension):**"
+subtitle: "Empirical Bayes vs. Fully Bayes for Multivariate Population References $\\theta_{\\mathrm{ref}} \\in \\mathbb{R}^p$ and Heterogeneous Distributional Slots $K \\geq 1$"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{Empirical Bayes vs. Fully Bayes -- Multivariate Extension}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+---
+
+# **1. Purpose and Relation to v07**
+
+The vignette `v07_eb_vs_fb.Rmd` (henceforth **v07**) develops the EB-vs-FB comparison for the population reference parameter $\theta_{\mathrm{ref}}$ under the simplifying assumption that $\theta_{\mathrm{ref}} \in \mathbb{R}$ is a **scalar** hyperparameter and that the model has a **single** distributional slot ($K = 1$). The four central results --- Theorem 7A (first-order equivalence), Proposition 7B (higher-order coverage discrepancy), Theorem 7C (compound decision bound), and Proposition 7D (substantial-discrepancy conditions) --- are stated in that scalar single-slot setting.
+
+The framework's canonical Asymmetric Multiplicative Model (AMM) admits, however, configurations in which:
+
+- **The population reference is itself multivariate**, $\theta_{\mathrm{ref}} \in \mathbb{R}^p$ with $p \geq 2$, when the anchored hierarchical structure has several upper-level components (e.g., $p = 2$ for a paired location-scale anchor; $p = 3$ for a triple anchoring a Beta-shape, Gamma-rate, and Tweedie-power slot jointly).
+- **The model has several distributional slots**, $K \geq 2$, when the family is mixture-typed (Zero-Inflated Poisson, Zero-Inflated Negative Binomial, Hurdle Poisson, Hurdle Negative Binomial) or heterogeneously typed (Beta in slot 1 + Gamma in slot 2; Student-$t$ in slot 1 + Gamma in slot 2 + Beta in slot 3; etc.).
+- **Both extensions occur simultaneously**, $p > 1$ and $K > 1$, in the full multivariate-and-heterogeneous regime that the framework's release-gate (Charter §2.4 of Sub-phase 8.6) commits to support.
+
+This vignette extends the four results of v07 to the **full $(p \geq 1, K \geq 1)$ regime** under the same family of regularity hypotheses --- now suitably indexed by $p$ and stated componentwise in $K$. The extension is stated as four results with an asterisk:
+
+- **Theorem 7A\*** (multivariate first-order equivalence; §4).
+- **Proposition 7B\*** (matrix-valued coverage discrepancy; §5).
+- **Theorem 7C\*** (compound decision bound under $K > 1$ heterogeneous slots; §6).
+- **Proposition 7D\*** (substantial-discrepancy conditions under $p > 1$ and/or $K > 1$; §7).
+
+Each asterisked result **reduces to its v07 counterpart as a corollary under $(p, K) = (1, 1)$**. The body of v07 remains canonical for the scalar single-slot case and is not reopened in this extension.
+
+## **1.1. Epistemic Posture and the Critical Audit of v07 §5**
+
+The extension is performed under three epistemic constraints documented in Charter §2.5 (Sub-phase 8.6):
+
+1. **Extension, not rewriting.** v07's Theorem 7A scalar statement and proof remain canonical in their domain ($p = 1$, $K = 1$). The multivariate extension is a **strictly stronger** statement requiring **strictly stronger** hypotheses (information matrix positive definite rather than non-zero; weakly informative prior in $\mathbb{R}^p$ rather than $\mathbb{R}$; bounded $C^2$ regularity of the log-marginal in a ball of $\mathbb{R}^p$ rather than in an interval of $\mathbb{R}$).
+
+2. **Pedagogical hierarchy.** Readers entering the EB-vs-FB comparison for the first time are referred to v07 (lower technical entry barrier; less notational overhead; identical conceptual content). This vignette is the technical extension for users whose model lives in $p > 1$ and/or $K > 1$.
+
+3. **Critical audit of v07 §5.** Per Charter §2.5, the redaction of the multivariate Theorem 7A\* is **preceded by an explicit line-by-line audit of the scalar proof of v07 §5** intended to detect any implicit use of a property valid in $\mathbb{R}$ but false in $\mathbb{R}^p$ (e.g., real monotonicity; one-dimensional change-of-variables; integration by parts on $\mathbb{R}$; sign of one-dimensional Fisher information taken as positivity rather than positive definiteness). The audit, summarized in §4.5 below, **detected no error**: v07 §5 transfers cleanly to $\mathbb{R}^p$ under the strengthened hypotheses listed in §3.
+
+If the audit had detected an implicit error, the redaction of this vignette would have been suspended and a parallel sub-sub-sub-phase 8.6.A.1 would have opened to reopen v07 explicitly. The fact that no error was detected confirms that v07's "reference and argument" delegation to Petrone--Rousseau--Scricciolo (2014) and Rousseau--Szabo (2017) is faithful to those references: both treat hyperparameters on Polish spaces of which finite-dimensional $\mathbb{R}^p$ is the routine specialization.
+
+## **1.2. Reading Order**
+
+For a reader already familiar with v07: §§2--3 (notation and hypotheses), §4 (Theorem 7A\*), §5 (Proposition 7B\*), §§6--7 (Theorem 7C\* and Proposition 7D\*), §8 (recommendation table for the multivariate case), §9 (open questions including the numerical-anti-fragility question O5\*-EBFB specific to multivariate Laplace), §10 (connections to the operational vignette `vop07` and to the API `gdpar_eb()`).
+
+For a reader unfamiliar with v07: start with v07 first; return here once the scalar single-slot case is conceptually clear.
+
+---
+
+# **2. Notation (Multivariate Extension)**
+
+## **2.1. Multivariate Population Reference and Heterogeneous Slots**
+
+Let $\eta = (\theta_{\mathrm{ref}}, a, b, W)$ as in Block 4 §2.1, with the partition into the **upper-level** parameter $\theta_{\mathrm{ref}}$ and the **lower-level** components $\xi = (a, b, W)$ unchanged. The multivariate extension introduces three structural dimensions:
+
+- $p := \dim(\theta_{\mathrm{ref}}) \geq 1$ is the dimensionality of the population reference. Under $p = 1$, $\theta_{\mathrm{ref}} \in \mathbb{R}$ as in v07; under $p \geq 2$, $\theta_{\mathrm{ref}} \in \mathbb{R}^p$ is a vector whose components anchor different aspects of the hierarchy jointly.
+- $K \geq 1$ is the number of distributional slots that the family declares. For a single-slot family ($K = 1$, e.g., Gaussian or Poisson), $\theta_{\mathrm{ref}}$ anchors that one slot. For a multi-slot family ($K \geq 2$, e.g., Zero-Inflated Poisson with $K = 2$ slots indexing $(\mu, \pi)$; Tweedie with $K = 3$ slots indexing $(\mu, \phi, p_{\mathrm{Tweedie}})$; heterogeneous Beta+Gamma with $K = 2$ slots), $\theta_{\mathrm{ref}}$ anchors each slot via a slot-indexed sub-parameter $\theta_{\mathrm{ref}}^{(k)} \in \mathbb{R}^{p_k}$ with $\sum_{k=1}^K p_k = p$ (additively in the no-overlap case). The framework's canonical implementation (Sub-phase 8.6.B--D of Charter §3) takes the slot-indexed case as the only operational one in the current release. A theoretically natural alternative ---a shared $\theta_{\mathrm{ref}}$ vector with cross-slot coupling across the $K$ slots--- exists in the multivariate AMM formulation but is scoped for a future block; it is not exposed as a configuration in `gdpar_eb()` or anywhere else in `gdpar 0.0.0.9001`.
+- $J \geq 1$ is the number of groups when the anchored hierarchy admits a grouping covariate (e.g., $J$ Argentine provinces; $J$ ecological sites). For $J = 1$ the hierarchy reduces to the single-group case of Blocks 1--6.
+
+The full **upper-level parameter tensor** of an AMM specification is therefore $\theta_{\mathrm{ref}} \in \mathbb{R}^{J \times K \times p}$, with $(p, K, J) = (1, 1, 1)$ recovering the simplest setting and $(p, K, J)$ all $\geq 2$ requiring the full machinery of this vignette.
+
+## **2.2. Marginal Likelihood in $\mathbb{R}^p$ and per-Slot Tensor under $K > 1$**
+
+The **marginal likelihood** of $\theta_{\mathrm{ref}}$ integrating out the lower-level parameters under their prior $\pi_\xi$ is, as in v07,
+$$L_n^{\mathrm{marg}}(\theta_{\mathrm{ref}}) \;:=\; \int p(Y_{1:n} \mid \theta_{\mathrm{ref}}, \xi)\, \pi_\xi(\xi)\, d\xi,$$
+now read as a function $L_n^{\mathrm{marg}}: \mathbb{R}^{J \times K \times p} \to \mathbb{R}_{\geq 0}$.
+
+The **Empirical Bayes estimator** of $\theta_{\mathrm{ref}}$ is
+$$\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}} \;=\; \mathop{\arg\max}_{\theta_{\mathrm{ref}} \in \Theta}\; L_n^{\mathrm{marg}}(\theta_{\mathrm{ref}}),$$
+with $\Theta \subseteq \mathbb{R}^{J \times K \times p}$ the admissible domain (typically the Cartesian product of per-component intervals or all of $\mathbb{R}^{J \times K \times p}$).
+
+The **Fisher information matrix** of the marginal likelihood at the population truth $\theta_{\mathrm{ref}}^*$ is
+$$I_{\theta\theta}^{\mathrm{marg}}(\theta_{\mathrm{ref}}^*) \;:=\; \mathbb{E}_{\eta_*}\!\left[ - \nabla^2_{\theta_{\mathrm{ref}}} \log L_n^{\mathrm{marg}}(\theta_{\mathrm{ref}})\big|_{\theta_{\mathrm{ref}}^*} \right] \;\in\; \mathbb{R}^{p \times p}.$$
+Under $p = 1$, $I_{\theta\theta}^{\mathrm{marg}}$ is a positive scalar (the Fisher information of v07 §4). Under $p \geq 2$, $I_{\theta\theta}^{\mathrm{marg}}$ is a $p \times p$ symmetric matrix; the **strictly stronger** identifiability assumption (EB-MARG-ID)$_p$ of §3 requires it to be **positive definite** (all eigenvalues strictly positive), not merely non-zero.
+
+Under $K > 1$ with slot-indexed sub-parameters $\theta_{\mathrm{ref}}^{(k)} \in \mathbb{R}^{p_k}$, the Fisher information becomes a **per-slot block tensor** of marginal information matrices:
+$$I_{\theta\theta}^{\mathrm{marg}, K}(\theta_{\mathrm{ref}}^*) \;=\; \left\{ I_{\theta\theta}^{\mathrm{marg}, k}(\theta_{\mathrm{ref}}^{*,(k)}) \right\}_{k=1}^K, \qquad I_{\theta\theta}^{\mathrm{marg}, k} \;\in\; \mathbb{R}^{p_k \times p_k}.$$
+Under the **factored prior** $\pi_\xi = \prod_{k=1}^K \pi_{\xi^{(k)}}$ of Theorem 7C\* (§6), the block tensor is block-diagonal and each block $I_{\theta\theta}^{\mathrm{marg}, k}$ is the Fisher information of the slot-$k$ marginal likelihood. Under the **coupled prior** of §6, off-block cross terms appear and the full Fisher matrix $I_{\theta\theta}^{\mathrm{marg}} \in \mathbb{R}^{p \times p}$ is not block-diagonal.
+
+## **2.3. Sensitivity Jacobian of the Conditional Posterior**
+
+A novel object that has no counterpart in v07 (because v07's scalar Proposition 7B \emph{implicitly} absorbs it into a constant) is the **sensitivity Jacobian** of the lower-level conditional posterior mode with respect to the upper-level reference:
+$$J^\xi(\theta_{\mathrm{ref}}) \;:=\; \frac{\partial\, \xi^*(\theta_{\mathrm{ref}})}{\partial\, \theta_{\mathrm{ref}}} \;\in\; \mathbb{R}^{\dim(\xi) \times p},$$
+where $\xi^*(\theta_{\mathrm{ref}}) := \arg\max_\xi \Pi_n^{\mathrm{cond}}(\xi \mid \theta_{\mathrm{ref}}, \cdot)$ is the lower-level conditional posterior mode given $\theta_{\mathrm{ref}}$. By the implicit-function theorem applied to the conditional first-order condition $\nabla_\xi \log p(Y_{1:n} \mid \theta_{\mathrm{ref}}, \xi^*) + \nabla_\xi \log \pi_\xi(\xi^*) = 0$,
+$$J^\xi(\theta_{\mathrm{ref}}) \;=\; -\left[ \nabla^2_{\xi\xi} \log \Pi_n^{\mathrm{cond}}(\xi^* \mid \theta_{\mathrm{ref}}, \cdot) \right]^{-1} \cdot \nabla^2_{\xi\theta_{\mathrm{ref}}} \log p(Y_{1:n} \mid \theta_{\mathrm{ref}}, \xi^*),$$
+which is well-defined under (HIER-COMPLEX)$_p$ of §3. Under $p = \dim(\xi) = 1$, $J^\xi$ is a scalar absorbed into v07's constant $C_{g,\alpha}$ without explicit naming. Under $p \geq 2$, the matrix $J^\xi$ enters explicitly in the sandwich form of Proposition 7B\* (§5).
+
+## **2.4. Total Variation, Weak Metric, and Posterior Distance**
+
+The asymptotic comparison of $\Pi_n^{\mathrm{EB}}$ and $\Pi_n^{\mathrm{FB}}$ over $\xi$ uses two metrics, paralleling v07 §2.2:
+
+- **Total variation** $d_{\mathrm{TV}}(\Pi_n^{\mathrm{EB}}, \Pi_n^{\mathrm{FB}}) = \sup_B |\Pi_n^{\mathrm{EB}}(\xi \in B) - \Pi_n^{\mathrm{FB}}(\xi \in B)|$ for **finite-dim parametric** $\xi$ (Regime A of v07 §5).
+- **Weak metric over smooth functionals** $\sup_{g \in \mathcal{G}} |\mathbb{E}_{\Pi_n^{\mathrm{EB}}}[g(\xi)] - \mathbb{E}_{\Pi_n^{\mathrm{FB}}}[g(\xi)]|$ over a class $\mathcal{G}$ of bounded $L^2(\mu)$-Lipschitz functionals for **non-parametric** $\xi$ (Regime B of v07 §5).
+
+The dimensionality of $\theta_{\mathrm{ref}}$ ($p$) and the dimensionality of $\xi$ are **independent**: the multivariate extension of this vignette concerns $p$; the parametric-vs-non-parametric distinction of $\xi$ governs the choice of metric. The four resulting combinations are tabulated in §4.
+
+## **2.5. Notation Summary**
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $p$ | Dimension of $\theta_{\mathrm{ref}}$ as a vector |
+| $K$ | Number of distributional slots in the family |
+| $J$ | Number of groups in the anchored hierarchy |
+| $\theta_{\mathrm{ref}} \in \mathbb{R}^{J \times K \times p}$ | Full upper-level parameter tensor |
+| $\theta_{\mathrm{ref}}^{(k)} \in \mathbb{R}^{p_k}$ | Slot-$k$ sub-parameter under $K > 1$, $\sum_k p_k = p$ in the no-overlap case |
+| $\xi = (a, b, W)$ | Lower-level parameters (function-valued) |
+| $\pi_\Theta, \pi_\xi$ | Priors on $\theta_{\mathrm{ref}}$ and $\xi$ |
+| $L_n^{\mathrm{marg}}(\theta_{\mathrm{ref}})$ | Marginal likelihood of $\theta_{\mathrm{ref}}$ |
+| $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}} \in \mathbb{R}^p$ | EB estimator (Type II ML) |
+| $I_{\theta\theta}^{\mathrm{marg}} \in \mathbb{R}^{p \times p}$ | Fisher information matrix of $L_n^{\mathrm{marg}}$ at $\theta_{\mathrm{ref}}^*$ |
+| $I_{\theta\theta}^{\mathrm{marg}, K} = \{I_{\theta\theta}^{\mathrm{marg}, k}\}_{k=1}^K$ | Per-slot tensor of Fisher information matrices under $K > 1$ |
+| $\Pi_n^{\mathrm{EB}}, \Pi_n^{\mathrm{FB}}$ | EB and FB posteriors over $\xi$ |
+| $\Pi_n^{\mathrm{cond}}(\xi \mid \theta_{\mathrm{ref}}, \cdot)$ | Conditional posterior of $\xi$ given $\theta_{\mathrm{ref}}$ |
+| $\xi^*(\theta_{\mathrm{ref}})$ | Conditional posterior mode of $\xi$ given $\theta_{\mathrm{ref}}$ |
+| $J^\xi(\theta_{\mathrm{ref}}) \in \mathbb{R}^{\dim(\xi) \times p}$ | Sensitivity Jacobian of $\xi^*$ w.r.t.\ $\theta_{\mathrm{ref}}$ |
+| $d_{\mathrm{TV}}, d_{\mathrm{weak}}$ | Posterior distances (TV and weak-over-functionals) |
+| $C_{g,\alpha}^* \in \mathbb{R}^{p \times p}$ | Matrix coverage discrepancy constant of Proposition 7B\* |
+| $\kappa(H)$ | Condition number of the Hessian $H$ (numerical anti-fragility, §9 O5\*) |
+
+---
+
+# **3. Standing Hypotheses (Multivariate Extension)**
+
+The three hypotheses of v07 §4 --- (EB-MARG-ID), (PRIOR-FB-WEAK), (HIER-COMPLEX) --- extend to the multivariate setting as follows. The asterisk on each hypothesis name denotes the strictly stronger requirement of the $p \geq 1$ (and $K \geq 1$) regime; under $p = K = 1$ each asterisked hypothesis reduces to its v07 counterpart.
+
+## **3.1. (EB-MARG-ID)$_p$ -- Multivariate Marginal Identifiability**
+
+> **(EB-MARG-ID)$_p$.** $L_n^{\mathrm{marg}}(\theta_{\mathrm{ref}})$ has a unique global maximum on the admissible domain $\Theta \subseteq \mathbb{R}^p$ in the limit $n \to \infty$, with the limiting Fisher information matrix
+> $$I_{\theta\theta}^{\mathrm{marg}}(\theta_{\mathrm{ref}}^*) \;\in\; \mathbb{R}^{p \times p}$$
+> **positive definite**: all $p$ eigenvalues $\lambda_1 \geq \cdots \geq \lambda_p$ of $I_{\theta\theta}^{\mathrm{marg}}$ satisfy $\lambda_p > 0$.
+
+Compared to v07's scalar (EB-MARG-ID), the requirement is **strictly stronger**: in $\mathbb{R}$ "non-zero Fisher information" is equivalent to positivity, but in $\mathbb{R}^p$ "non-singularity" (det $\neq 0$) does not imply positive definiteness in general --- and only the latter ensures that the multivariate Bernstein--von Mises (BvM) limit of the marginal posterior is a proper $p$-variate Gaussian with covariance $n^{-1} (I_{\theta\theta}^{\mathrm{marg}})^{-1}$. The smallest eigenvalue $\lambda_p$ controls the **effective sample size for the most poorly identified direction**: when $\lambda_p$ is small, $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$ has a large variance along the eigenvector of $\lambda_p$, and the gap between EB and FB widens in that direction (Proposition 7D\* (ii)\*, §7).
+
+Under $K > 1$ with slot-indexed $\theta_{\mathrm{ref}}^{(k)} \in \mathbb{R}^{p_k}$, (EB-MARG-ID)$_p$ generalizes componentwise: each block matrix $I_{\theta\theta}^{\mathrm{marg}, k} \in \mathbb{R}^{p_k \times p_k}$ must be positive definite. Under the factored prior $\pi_\xi = \prod_k \pi_{\xi^{(k)}}$ of §6, this is equivalent to (EB-MARG-ID)$_p$ for $L_n^{\mathrm{marg}}$ as a whole; under coupled prior, the cross-block terms must satisfy a strict-diagonal-dominance condition for the full matrix to remain positive definite.
+
+## **3.2. (PRIOR-FB-WEAK)$_p$ -- Weak FB Prior in $\mathbb{R}^p$**
+
+> **(PRIOR-FB-WEAK)$_p$.** The FB prior $\pi_\Theta$ on $\theta_{\mathrm{ref}} \in \mathbb{R}^p$ has positive density at $\theta_{\mathrm{ref}}^*$ and the FB posterior asymptotically dominates the prior componentwise, in the sense that
+> $$\frac{\mathrm{tr}\,\mathrm{Cov}_n(\theta_{\mathrm{ref}}^*)}{\mathrm{tr}\,\mathrm{Cov}_\pi(\theta_{\mathrm{ref}})} \;\to\; 0 \qquad \text{as } n \to \infty.$$
+> Equivalently, the maximum eigenvalue of $\mathrm{Cov}_n(\theta_{\mathrm{ref}}^*) \cdot \mathrm{Cov}_\pi(\theta_{\mathrm{ref}})^{-1}$ tends to zero.
+
+The trace-based formulation is the natural multivariate analog of v07's scalar $\mathrm{Var}_n / \mathrm{Var}_\pi \to 0$. Under $p = 1$, it reduces exactly to v07's (PRIOR-FB-WEAK). The eigenvalue-based equivalent formulation has the advantage of being **invariant under linear reparametrization** of $\theta_{\mathrm{ref}}$: a reparametrization $\theta_{\mathrm{ref}} \mapsto A \theta_{\mathrm{ref}}$ leaves the eigenvalues of the covariance ratio unchanged. The trace formulation is sufficient for the asymptotic theory of §§4--6 and is what the framework's library reports as a diagnostic in `gdpar_eb_fit$diagnostics$prior_dominance_ratio` (Sub-phase 8.6.B, Charter §3.2).
+
+The hypothesis is satisfied by typical multivariate priors (independent Gaussian per component with sufficient variance; multivariate Cauchy; multivariate Student-$t$). It fails when the prior is strongly informative on one component while the data informs that component weakly (Proposition 7D\* (iii)\*, §7).
+
+## **3.3. (HIER-COMPLEX)$_p$ -- Multivariate Hierarchical Regularity**
+
+> **(HIER-COMPLEX)$_p$.** The log-marginal likelihood $\log L_n^{\mathrm{marg}}(\theta_{\mathrm{ref}})$ is twice continuously differentiable on an open neighborhood $B_\delta(\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}) \subseteq \mathbb{R}^p$ of radius $\delta > 0$, with Hessian bounded uniformly in $n$. The number of upper-level hyperparameters $p$ is bounded as $n$ grows.
+
+This combines v07's scalar (HIER-COMPLEX) (bounded number of upper-level hyperparameters) with the new **$C^2$ regularity requirement** that supports the multivariate Laplace approximation of step (i) in §11.1 of v07 --- namely, that the marginal likelihood can be expanded to second order around $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$ in $\mathbb{R}^p$ with the Hessian inverse providing the Gaussian curvature of the approximation. Under $p = 1$, $C^2$ regularity on an interval is the same condition required (implicitly) by v07 §5; the multivariate extension makes it explicit because it is the operative regularity used in the proof of Theorem 7A\* (§4) and in the matrix-correction form of Proposition 7B\* (§5).
+
+The boundedness of $p$ as $n$ grows is the standard hierarchical complexity bound. If $p$ itself grew with $n$ (e.g., $p = p_n \to \infty$), the analysis would require non-parametric extensions and is deferred to Block 9.x (Open Question O3\*-EBFB, §9). The framework's release-gate (Charter §2.4) treats $p$ as fixed (chosen by the analyst from the family specification) and $n$ as the asymptotic index.
+
+## **3.4. Discussion: Why the Asterisked Hypotheses are Strictly Stronger**
+
+| v07 (scalar) | v07b (multivariate) | Strict strengthening |
+|:-------------|:--------------------|:---------------------|
+| $I_{\theta\theta}^{\mathrm{marg}} \neq 0$ (positivity) | $I_{\theta\theta}^{\mathrm{marg}} \succ 0$ (positive definiteness) | All $p$ eigenvalues strictly positive |
+| $\mathrm{Var}_n / \mathrm{Var}_\pi \to 0$ | $\mathrm{tr\,Cov}_n / \mathrm{tr\,Cov}_\pi \to 0$ | Componentwise data swamping |
+| $C^2$ in an interval | $C^2$ in a $p$-ball | Multivariate Laplace second-order |
+| $p$ scalar fixed | $p \in \mathbb{N}$ fixed | Boundedness of upper-level dim |
+
+The strengthenings are **not stylistic conveniences**: each is necessary to support the multivariate proof of §4. In particular, (EB-MARG-ID)$_p$ as positive definiteness (not merely non-zero determinant) is the **gateway condition** for the multivariate BvM of the marginal posterior; without it, the posterior may concentrate as a degenerate Gaussian on a lower-dimensional subspace, breaking the equivalence with the conditional EB posterior.
+
+---
+
+# **4. Theorem 7A\* -- First-Order Asymptotic Equivalence (Multivariate)**
+
+> **Theorem 7A\*. First-order asymptotic equivalence in $\mathbb{R}^p$, $K \geq 1$.** Under the framework's standing hypotheses (C1)--(C6), (LIN), (D-ID) of Block 1; the asymptotic hypotheses of Theorem 4A of Block 4; plus the multivariate extensions (EB-MARG-ID)$_p$, (PRIOR-FB-WEAK)$_p$, (HIER-COMPLEX)$_p$ of §3, the EB and FB posteriors over $\xi$ agree asymptotically. The metric in which agreement holds depends jointly on the **dimensionality of $\xi$** (parametric vs.\ non-parametric) and the **dimensionality $p$ of $\theta_{\mathrm{ref}}$**.
+
+The four-cell classification:
+
+| | $\xi$ finite-dim parametric (Regime A) | $\xi$ non-parametric (Regime B) |
+|:---|:---|:---|
+| **$p = 1$ (scalar $\theta_{\mathrm{ref}}$)** | $d_{\mathrm{TV}}(\Pi_n^{\mathrm{EB}}, \Pi_n^{\mathrm{FB}}) \xrightarrow{P_{\eta_*}} 0$. This is v07's Theorem 7A Regime A. | $\sup_{g \in \mathcal{G}} |\mathbb{E}^{\mathrm{EB}}[g(\xi)] - \mathbb{E}^{\mathrm{FB}}[g(\xi)]| \xrightarrow{P_{\eta_*}} 0$. This is v07's Theorem 7A Regime B. |
+| **$p \geq 2$ (multivariate $\theta_{\mathrm{ref}}$)** | $d_{\mathrm{TV}}(\Pi_n^{\mathrm{EB}}, \Pi_n^{\mathrm{FB}}) \xrightarrow{P_{\eta_*}} 0$ in the finite-dim parameter space. Multivariate BvM for the marginal posterior of $\theta_{\mathrm{ref}}$ ensures concentration at parametric rate $n^{-1/2}$ in $\mathbb{R}^p$. | $\sup_{g \in \mathcal{G}} |\mathbb{E}^{\mathrm{EB}}[g(\xi)] - \mathbb{E}^{\mathrm{FB}}[g(\xi)]| \xrightarrow{P_{\eta_*}} 0$. The functional class $\mathcal{G}$ depends on $\xi$ only; the dimension $p$ of $\theta_{\mathrm{ref}}$ enters only through the concentration rate of the marginal posterior in $\mathbb{R}^p$. |
+
+Under $K > 1$ with slot-indexed sub-parameters and **factored prior** $\pi_\xi = \prod_{k=1}^K \pi_{\xi^{(k)}}$, the four-cell classification holds **slotwise**: the posterior factorizes as $\Pi_n^{\bullet}(\xi \mid \cdot) = \prod_{k=1}^K \Pi_n^{\bullet}(\xi^{(k)} \mid \cdot)$ for $\bullet \in \{\mathrm{EB}, \mathrm{FB}\}$, and the metric for the full posterior is the product metric. Under **coupled prior**, cross-slot terms contribute as in Theorem 7C\* (§6) but the first-order equivalence (Theorem 7A\*) is preserved.
+
+**Corollary (reduction to v07).** Under $(p, K) = (1, 1)$, Theorem 7A\* reduces to v07's Theorem 7A. The two left-column cells of the four-cell table are exactly v07's two-regime statement of v07 §5.
+
+## **4.1. Proof Sketch (Extension of v07's Reference Argument)**
+
+The proof of v07 §5 (the "reference and argument") generalizes to $\mathbb{R}^p$ in four steps, each retracing the v07 argument with the strengthened hypotheses of §3.
+
+**Step 1 -- FB posterior decomposition.** As in v07,
+$$\Pi_n^{\mathrm{FB}}(\xi \mid \cdot) \;=\; \int_{\mathbb{R}^p} \Pi_n^{\mathrm{cond}}(\xi \mid \theta_{\mathrm{ref}}, \cdot)\; \Pi_n^{\mathrm{marg}}(\theta_{\mathrm{ref}} \mid \cdot)\; d\theta_{\mathrm{ref}}.$$
+The decomposition is algebraically valid for any $p \geq 1$; the dimensionality enters only through the domain of integration.
+
+**Step 2 -- Marginal posterior concentration via multivariate BvM.** Under (EB-MARG-ID)$_p$ (positive definite Fisher) and (PRIOR-FB-WEAK)$_p$ (data swamps prior), the multivariate Bernstein--von Mises theorem (van der Vaart 1998, Chapter 10; Castillo and Rousseau 2015 for smooth functionals; Rousseau and Szabo 2017 §3 for total variation quantification) gives
+$$d_{\mathrm{TV}}\!\left(\, \Pi_n^{\mathrm{marg}}(\theta_{\mathrm{ref}} \mid \cdot),\; \mathcal{N}\!\left(\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}},\; n^{-1} \bigl(I_{\theta\theta}^{\mathrm{marg}}\bigr)^{-1}\right) \right) \;\xrightarrow{P_{\eta_*}}\; 0.$$
+The covariance $n^{-1} (I_{\theta\theta}^{\mathrm{marg}})^{-1}$ is the inverse $p \times p$ matrix Fisher info; its existence requires the **positive definiteness** of (EB-MARG-ID)$_p$, not merely the non-singularity. In particular, the concentration rate is **uniform across all directions in $\mathbb{R}^p$**, with the slowest direction governed by the smallest eigenvalue $\lambda_p > 0$ of $I_{\theta\theta}^{\mathrm{marg}}$. This step is the multivariate generalization of v07's "the marginal posterior of $\theta_{\mathrm{ref}}$ concentrates at $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$".
+
+**Step 3 -- Identification of MML maximizer and posterior mode.** Under (PRIOR-FB-WEAK)$_p$, the gradient $\nabla_{\theta_{\mathrm{ref}}} \log \pi_\Theta(\theta_{\mathrm{ref}}) / n \to 0$ componentwise (the prior's logarithmic-derivative scaled by $n^{-1}$ vanishes), so the maximizer of $L_n^{\mathrm{marg}} \cdot \pi_\Theta$ (posterior mode) and the maximizer of $L_n^{\mathrm{marg}}$ alone ($\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$) differ by $O_P(n^{-1})$. The two coincide to leading order, and the Gaussian centering in Step 2 can be taken at either.
+
+**Step 4 -- Lipschitz/smoothness of $\theta_{\mathrm{ref}} \mapsto \Pi_n^{\mathrm{cond}}(\xi \mid \theta_{\mathrm{ref}}, \cdot)$.** Under (HIER-COMPLEX)$_p$ ($C^2$ in a ball), the conditional posterior depends on $\theta_{\mathrm{ref}}$ smoothly: for any $h \in \mathbb{R}^p$ small,
+$$\left\| \Pi_n^{\mathrm{cond}}(\xi \mid \widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}} + h, \cdot) - \Pi_n^{\mathrm{cond}}(\xi \mid \widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}, \cdot) \right\|_{\bullet} \;\leq\; L\, \|h\|,$$
+where $\|\cdot\|_\bullet$ is $d_{\mathrm{TV}}$ in Regime A and the weak-over-$\mathcal{G}$ metric in Regime B, $\|h\|$ is the Euclidean norm in $\mathbb{R}^p$, and $L > 0$ is the Lipschitz constant given by the maximum eigenvalue of the conditional Hessian (existence of $L$ follows from (HIER-COMPLEX)$_p$). Combined with the $O_P(n^{-1/2})$ concentration of Step 2, the difference
+$$\left| \int \Pi_n^{\mathrm{cond}}(\xi \mid \theta_{\mathrm{ref}}, \cdot)\, \Pi_n^{\mathrm{marg}}(\theta_{\mathrm{ref}} \mid \cdot)\, d\theta_{\mathrm{ref}} \;-\; \Pi_n^{\mathrm{cond}}(\xi \mid \widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}, \cdot) \right|$$
+in the relevant metric is $O_P(L \cdot n^{-1/2}) \to 0$. This identifies the FB posterior with $\Pi_n^{\mathrm{EB}}(\xi \mid \cdot) = \Pi_n^{\mathrm{cond}}(\xi \mid \widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}, \cdot)$ asymptotically. $\square$
+
+The four steps reproduce v07's "reference and argument" with $\mathbb{R}$ replaced by $\mathbb{R}^p$ throughout. Each step is the routine multivariate generalization established in the cited literature (Petrone--Rousseau--Scricciolo 2014; Rousseau--Szabo 2017; Castillo--Rousseau 2015; van der Vaart 1998).
+
+## **4.2. Why Total Variation is Restricted to Regime A (Multivariate Refinement)**
+
+The v07 §5 caveat that TV is restricted to Regime A is **independent of $p$**: it depends on the dimensionality of $\xi$, not of $\theta_{\mathrm{ref}}$. In non-parametric Bayesian inference, the posterior over an infinite-dim $\xi$ does not converge in TV but in Hellinger or $L^2(\mu)$ or in the weak-over-$\mathcal{G}$ metric (van der Vaart and van Zanten 2008; Ghosal--van der Vaart 2017). The multivariate dimension of $\theta_{\mathrm{ref}}$ does not change this conclusion: the only modification is the rate of concentration of the marginal posterior (which is $n^{-1/2}$ in each of the $p$ coordinates).
+
+A subtlety specific to the multivariate setting: even in Regime A (finite-dim parametric $\xi$), TV convergence under $p \geq 2$ requires the additional regularity that the **Laplace approximation in $\mathbb{R}^p$** is uniformly accurate over the relevant neighborhood. This is guaranteed by (HIER-COMPLEX)$_p$ but is worth noting because the multivariate Laplace approximation can fail numerically (not theoretically) when $I_{\theta\theta}^{\mathrm{marg}}$ has condition number $\kappa = \lambda_1 / \lambda_p$ large --- see §9 O5\*-EBFB.
+
+## **4.3. Practical Implication of Theorem 7A\***
+
+For large $n$, weakly informative priors on $\theta_{\mathrm{ref}}$, and well-conditioned $I_{\theta\theta}^{\mathrm{marg}}$, **EB and FB give essentially the same posterior over $\xi$** in the metric appropriate to the dimensionality of $\xi$. The dimensionality $p$ of $\theta_{\mathrm{ref}}$ and the number of slots $K$ enter only through (i) the strength of the regularity hypotheses (which scale with $p$ and $K$), (ii) the rate at which the smallest eigenvalue $\lambda_p$ of $I_{\theta\theta}^{\mathrm{marg}}$ governs identifiability, and (iii) the numerical difficulty of the multivariate Laplace step (§9 O5\*-EBFB).
+
+The choice between EB and FB therefore remains, to first order, **primarily computational and methodological**: EB is faster (Sub-phase 8.6.B's `cmdstanr::laplace()` call typically completes in $\sim 10\%$ of the FB sampling time on the same model); FB integrates over $\theta_{\mathrm{ref}}$ honestly (does not require choosing $\pi_\Theta$). Higher-order coverage and finite-sample considerations (§§5--6) refine this picture.
+
+## **4.4. Reduction to v07's Theorem 7A under $(p, K) = (1, 1)$**
+
+Under $p = 1$ and $K = 1$:
+
+- (EB-MARG-ID)$_1$ = (EB-MARG-ID) of v07 §4 (positivity of scalar Fisher information).
+- (PRIOR-FB-WEAK)$_1$ = (PRIOR-FB-WEAK) of v07 §4 (scalar variance ratio).
+- (HIER-COMPLEX)$_1$ = (HIER-COMPLEX) of v07 §4 augmented with explicit $C^2$ on an interval (the implicit regularity of v07's "reference and argument").
+- The four-cell table reduces to its two left-column cells: Regime A (TV) and Regime B (weak-over-$\mathcal{G}$).
+- The proof sketch (§4.1) reduces to v07's Steps 1--4 with $\mathbb{R}$ in place of $\mathbb{R}^p$ and scalars in place of matrices.
+
+Theorem 7A\* therefore **strictly contains** Theorem 7A of v07: every assertion of v07 §5 is an instance of Theorem 7A\* under $(p, K) = (1, 1)$.
+
+## **4.5. Audit Trail: v07 §5 Reviewed Line by Line**
+
+The redaction of this vignette was preceded by a line-by-line audit of v07 §5 intended to detect implicit use of any property valid in $\mathbb{R}$ but false in $\mathbb{R}^p$. The four audit-relevant assertions, in the order they appear in v07 §5, are:
+
+1. **"The argument decomposes the FB posterior as the average of the conditional posterior given $\theta_{\mathrm{ref}}$ over the marginal posterior of $\theta_{\mathrm{ref}}$."** Algebraic identity (mixture decomposition) valid in any dimension. **No scalar-specific property used.**
+2. **"Under (PRIOR-FB-WEAK), the marginal posterior of $\theta_{\mathrm{ref}}$ concentrates at $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$."** Multivariate BvM in $\mathbb{R}^p$ requires positive definite $I_{\theta\theta}^{\mathrm{marg}}$; the scalar v07 version requires positivity. The strengthening is explicit in (EB-MARG-ID)$_p$ of §3. **No implicit scalar-specific assumption.**
+3. **"The conditional posterior at the concentration point coincides with the EB posterior."** Definition of $\Pi_n^{\mathrm{EB}}$; valid in any dimension.
+4. **"The difference between FB and EB is thus the difference between integrating with respect to a concentrated distribution and evaluating at its mode, which goes to zero in the appropriate metric for the dimension of $\xi$."** Requires Lipschitz/smoothness of $\theta_{\mathrm{ref}} \mapsto \Pi_n^{\mathrm{cond}}(\xi \mid \theta_{\mathrm{ref}}, \cdot)$ in the appropriate metric. In $\mathbb{R}$ this is $|h|$-Lipschitz; in $\mathbb{R}^p$ it is $\|h\|$-Lipschitz with Euclidean norm. Norm equivalence in finite dimension ensures transfer. **No scalar-specific argument.**
+
+**Audit conclusion.** v07 §5 transfers cleanly to $\mathbb{R}^p$ under the strictly stronger hypotheses of §3. No implicit error detected. The "reference and argument" delegation of v07 §5 to Petrone--Rousseau--Scricciolo (2014) and Rousseau--Szabo (2017) is faithful: both treat hyperparameters on Polish spaces, of which finite-dimensional $\mathbb{R}^p$ is the routine specialization.
+
+A minor pedagogical opacity in v07 §6 (not §5) is addressed in §5 of this vignette: v07's scalar formula $C_{g,\alpha} \approx (g'(\xi^*))^2 / I_{\theta\theta}^{\mathrm{marg}} \cdot \kappa(\alpha)$ implicitly absorbs a sensitivity factor $\partial \xi^* / \partial \theta_{\mathrm{ref}}$ into the leading coefficient. The multivariate Proposition 7B\* makes this Jacobian (called $J^\xi$ in §2.3) explicit as part of a sandwich quadratic form, recovering the scalar v07 §6 formula as the $p = \dim(\xi) = 1$ specialization.
+
+---
+
+# **5. Proposition 7B\* -- Higher-Order Coverage Discrepancy (Matrix Form)**
+
+> **Proposition 7B\*. Higher-order coverage discrepancy in $\mathbb{R}^p$, $K \geq 1$.** Under the hypotheses of Theorem 7A\* and the additional regularity required by standard higher-order expansions in $\mathbb{R}^p$ (smoothness of the functional $g: \mathbb{R}^{\dim(\xi)} \to \mathbb{R}$ at $\xi^*$ with three or more bounded derivatives; well-conditioned $I_{\theta\theta}^{\mathrm{marg}}$ at the truth; the multivariate Edgeworth-type expansion conditions of Bickel and Ghosh 1990 generalized to $\mathbb{R}^p$), the EB credible interval for the smooth functional $g(\xi)$ has coverage that differs from the nominal level by an amount of order $n^{-1}$:
+> $$\mathbb{P}_{\eta_*}\!\bigl(\, g(\xi^*) \in \mathrm{CI}_n^{\mathrm{EB}, \alpha} \bigr) \;=\; (1 - \alpha)\; -\; \mathrm{tr}\!\bigl(C_{g, \alpha}^*\bigr) \cdot n^{-1}\; +\; o(n^{-1}),$$
+> where the **matrix coverage discrepancy constant** $C_{g, \alpha}^* \in \mathbb{R}^{p \times p}$ has the explicit sandwich form
+> $$C_{g, \alpha}^* \;=\; \kappa(\alpha) \cdot \bigl[J^\xi(\theta_{\mathrm{ref}}^*)\bigr]^\top \cdot \nabla_\xi g(\xi^*) \cdot \nabla_\xi g(\xi^*)^\top \cdot J^\xi(\theta_{\mathrm{ref}}^*) \cdot \bigl(I_{\theta\theta}^{\mathrm{marg}}\bigr)^{-1},$$
+> with $J^\xi \in \mathbb{R}^{\dim(\xi) \times p}$ the sensitivity Jacobian of §2.3 and $\kappa(\alpha)$ the standard-normal level constant ($\kappa(0.05) \approx 1.92$). The FB credible interval has coverage of nominal level to first order:
+> $$\mathbb{P}_{\eta_*}\!\bigl(\, g(\xi^*) \in \mathrm{CI}_n^{\mathrm{FB}, \alpha} \bigr) \;=\; (1 - \alpha) + o(n^{-1/2}).$$
+> Under the stated standard expansion conditions, **EB credible intervals therefore systematically under-cover** relative to FB at the $n^{-1}$ rate.
+
+## **5.1. Derivation Sketch**
+
+The under-coverage arises from the fact that EB conditions on a point estimate $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$ and ignores the variability in this estimator, whereas FB integrates over the posterior of $\theta_{\mathrm{ref}}$. Under the multivariate BvM of Step 2 of §4.1, $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$ has approximate covariance $n^{-1} (I_{\theta\theta}^{\mathrm{marg}})^{-1}$. The EB-side variance of the plug-in estimator $g(\xi^*(\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}))$, by the multivariate delta method, includes the propagated contribution
+$$\mathrm{Var}_{\mathrm{EB-FB}}\!\bigl[ g(\xi^*) \bigr] \;\approx\; \bigl[\nabla_\xi g(\xi^*)^\top \cdot J^\xi \cdot \mathrm{Cov}(\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}) \cdot (J^\xi)^\top \cdot \nabla_\xi g(\xi^*)\bigr] \;\approx\; \frac{1}{n} \nabla_\xi g(\xi^*)^\top J^\xi (I_{\theta\theta}^{\mathrm{marg}})^{-1} (J^\xi)^\top \nabla_\xi g(\xi^*).$$
+The EB credible interval, computed from $\Pi_n^{\mathrm{EB}}(\xi \mid \widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}})$ alone, omits this contribution; FB's posterior includes it via the marginalization over $\theta_{\mathrm{ref}}$. The coverage deficit at level $1 - \alpha$ is therefore proportional to the trace of the omitted covariance contribution scaled by $\kappa(\alpha)$, which is exactly $\mathrm{tr}(C_{g,\alpha}^*) / n$. The Edgeworth-type expansion conditions of Bickel--Ghosh (1990) generalized to $\mathbb{R}^p$ ensure the $o(n^{-1})$ remainder.
+
+## **5.2. Reduction to v07's Scalar Proposition 7B under $p = \dim(\xi) = 1$**
+
+When $p = 1$ and $\dim(\xi) = 1$:
+
+- $J^\xi \in \mathbb{R}^{1 \times 1}$ is the scalar sensitivity $\partial \xi^* / \partial \theta_{\mathrm{ref}}$.
+- $\nabla_\xi g(\xi^*) \in \mathbb{R}^{1 \times 1}$ is the scalar derivative $g'(\xi^*)$.
+- $(I_{\theta\theta}^{\mathrm{marg}})^{-1} \in \mathbb{R}^{1 \times 1}$ is the scalar inverse Fisher information $1 / I_{\theta\theta}^{\mathrm{marg}}$.
+- $C_{g,\alpha}^*$ degenerates to a scalar: $C_{g,\alpha}^* = \kappa(\alpha) \cdot (g'(\xi^*))^2 \cdot (J^\xi)^2 / I_{\theta\theta}^{\mathrm{marg}}$.
+
+The scalar v07 §6 formula $C_{g,\alpha} \approx (g'(\xi^*))^2 / I_{\theta\theta}^{\mathrm{marg}} \cdot \kappa(\alpha)$ absorbs $(J^\xi)^2$ into the proportionality constant. Under the convention that $J^\xi = 1$ for a one-dimensional smooth identity $\xi \mapsto \xi$ (Carlin--Gelfand 1990 §3), the formulas coincide exactly. In the multivariate extension this absorption is no longer harmless: $J^\xi$ depends explicitly on the hierarchy's coupling between $\theta_{\mathrm{ref}}$ and $\xi$, and a value $\|J^\xi\| \gg 1$ amplifies the under-coverage proportionally.
+
+## **5.3. Effective Sensitivity Diagonalization (Practical Form)**
+
+For a practical formula independent of explicit Jacobian computation, diagonalize the sandwich:
+$$\mathrm{tr}\!\bigl(C_{g,\alpha}^*\bigr) \;=\; \kappa(\alpha) \cdot \nabla_\xi g(\xi^*)^\top \cdot J^\xi (I_{\theta\theta}^{\mathrm{marg}})^{-1} (J^\xi)^\top \cdot \nabla_\xi g(\xi^*).$$
+Let $\Sigma_{\mathrm{EB-FB}} := J^\xi (I_{\theta\theta}^{\mathrm{marg}})^{-1} (J^\xi)^\top \in \mathbb{R}^{\dim(\xi) \times \dim(\xi)}$ be the **EB-vs-FB covariance gap matrix**, computable post-hoc from the EB fit (via finite differences on $\theta_{\mathrm{ref}} \mapsto \xi^*(\theta_{\mathrm{ref}})$ for $J^\xi$ and from the Laplace Hessian for $I_{\theta\theta}^{\mathrm{marg}}$). Then
+$$\mathrm{tr}\!\bigl(C_{g,\alpha}^*\bigr) \;=\; \kappa(\alpha) \cdot \nabla_\xi g(\xi^*)^\top \cdot \Sigma_{\mathrm{EB-FB}} \cdot \nabla_\xi g(\xi^*),$$
+and the EB credible interval for $g(\xi^*)$ is corrected by inflating its width by a factor approximately $\sqrt{1 + \mathrm{tr}(C_{g,\alpha}^*)/(n - q)}$ to recover nominal coverage, where $q$ is the effective degree-of-freedom adjustment (typically the dimension of $\xi$ relevant to the conditional posterior of $g(\xi)$).
+
+This is the form implemented by `eb_correction = TRUE` (the default in `gdpar_eb()`, per Charter §2.6 of Sub-phase 8.6).
+
+## **5.4. Operational Note and the `eb_correction` Argument**
+
+Per Charter §2.6 (Sub-phase 8.6) and per the operative description of v07 §11.1, the framework's library applies the Proposition 7B\* correction **by default** (`eb_correction = TRUE`):
+
+- Under $p = 1$, the scalar correction of v07 §6 is applied.
+- Under $p \geq 2$, the matrix correction $C_{g,\alpha}^* \in \mathbb{R}^{p \times p}$ of this section is applied via its diagonalized form (§5.3).
+- The user can set `eb_correction = FALSE` to retrieve nominal (un-corrected) intervals, in which case the library emits a `gdpar_diagnostic_warning` advising of the expected $O(n^{-1})$ under-cover (per Sub-phase 8.6.B's implementation).
+
+**Caveat: the correction is approximate.** As in v07 §6, the correction depends on standard Edgeworth-type expansion conditions and on smoothness of $g$ at $\xi^*$. Under non-smooth functionals, near-singular $I_{\theta\theta}^{\mathrm{marg}}$, or distributions for which Edgeworth expansions fail (e.g., heavy-tailed Student-$t$ slots; mixture families with near-modes-of-non-identifiability), the correction's accuracy degrades. The framework recommends FB whenever the standard expansion conditions are in doubt; the EB correction is offered as a partial correction for cases where the user has chosen EB for computational reasons.
+
+---
+
+# **6. Theorem 7C\* -- Compound Decision Bound (Multi-Slot $K > 1$)**
+
+> **Theorem 7C\*. Compound decision bound under $K \geq 1$ heterogeneous slots.** Suppose the hierarchical model has $K \geq 1$ distributional slots indexed by $k = 1, \ldots, K$, with slot-$k$ parameter $\xi^{(k)}$ drawn (under exchangeability across $J$ groups within slot) from a per-slot prior $\pi_{\xi^{(k)}}$ depending on a slot-specific hyperparameter $\theta_{\mathrm{ref}}^{(k)} \in \mathbb{R}^{p_k}$. Let $\widehat{\xi}^{(k), \mathrm{EB}}$ denote the slot-$k$ EB estimator with $\widehat{\theta}_{\mathrm{ref}}^{(k), \mathrm{EB}}$ plugged in, and $\widehat{\xi}^{(k), \mathrm{FB}}$ the slot-$k$ FB estimator (joint posterior mean). Then:
+>
+> **(Case A) Factored prior $\pi_\xi = \prod_{k=1}^K \pi_{\xi^{(k)}}$.** Slotwise compound decision factorizes:
+> $$\frac{1}{K} \sum_{k=1}^K \mathbb{E}\!\bigl[ (\widehat{\xi}^{(k), \mathrm{EB}} - \xi^{(k)*})^2 \bigr] \;\leq\; \frac{1}{K} \sum_{k=1}^K \mathbb{E}\!\bigl[ (\widehat{\xi}^{(k), \mathrm{FB}} - \xi^{(k)*})^2 \bigr] + \frac{1}{K} \sum_{k=1}^K B_{J, k},$$
+> where each per-slot gap $B_{J, k} \leq C_1^{(k)} J^{-1} \mathbb{E}\bigl[ \|\widehat{\theta}_{\mathrm{ref}}^{(k), \mathrm{EB}} - \theta_{\mathrm{ref}}^{(k)*}\|^2 \bigr] \to 0$ as $J \to \infty$, for a constant $C_1^{(k)} > 0$ depending on the sensitivity of the slot-$k$ conditional posterior mean to $\theta_{\mathrm{ref}}^{(k)}$.
+>
+> **(Case B) Coupled prior $\pi_\xi$ not factored across slots.** The bound includes an explicit cross-slot interaction term:
+> $$\frac{1}{K} \sum_{k=1}^K \mathbb{E}\!\bigl[ (\widehat{\xi}^{(k), \mathrm{EB}} - \xi^{(k)*})^2 \bigr] \;\leq\; \frac{1}{K} \sum_{k=1}^K \mathbb{E}\!\bigl[ (\widehat{\xi}^{(k), \mathrm{FB}} - \xi^{(k)*})^2 \bigr] + \frac{1}{K} \sum_{k=1}^K B_{J, k}\; +\; \mathcal{B}_{\mathrm{coupling}},$$
+> where the **coupling residual** $\mathcal{B}_{\mathrm{coupling}}$ is bounded explicitly by
+> $$\mathcal{B}_{\mathrm{coupling}} \;\leq\; \frac{1}{K^2} \sum_{k \neq k'} C_{\mathrm{cross}}^{(k, k')} \cdot J^{-1} \cdot \mathbb{E}\!\bigl[ \|\widehat{\theta}_{\mathrm{ref}}^{(k), \mathrm{EB}} - \theta_{\mathrm{ref}}^{(k)*}\| \cdot \|\widehat{\theta}_{\mathrm{ref}}^{(k'), \mathrm{EB}} - \theta_{\mathrm{ref}}^{(k')*}\| \bigr],$$
+> with $C_{\mathrm{cross}}^{(k, k')} > 0$ derived from the cross-slot block of the coupled prior's Hessian. $\mathcal{B}_{\mathrm{coupling}} \to 0$ as $J \to \infty$ under (HIER-COMPLEX)$_p$.
+
+## **6.1. Reduction to v07's Theorem 7C under $K = 1$**
+
+Under $K = 1$: Case A collapses to v07's Theorem 7C with $K$ replaced by $J$ (in v07's notation, the symbol $K$ stood for the number of exchangeable units within the single slot; in this vignette, $K$ stands for the number of distributional slots and $J$ stands for the number of groups within each slot). The relabeling does not change content: the gap $B_{J, 1}$ tends to zero as the number of within-slot exchangeable units grows, reproducing v07's $B_K \to 0$ as $K \to \infty$ verbatim. **Case B is vacuous under $K = 1$** (no cross-slot coupling exists).
+
+## **6.2. Two Regimes of Practical Use (Multi-Slot Refinement)**
+
+- **$J$ large within slots, $K$ moderate**: per-slot EB risk approaches per-slot FB risk; EB is the practical choice slot-by-slot. The aggregate bound is dominated by the per-slot gaps.
+- **$J$ small, $K$ small**: the gap $B_{J, k}$ is non-negligible per slot, and under coupled prior the residual $\mathcal{B}_{\mathrm{coupling}}$ adds an explicit cross-slot penalty. FB is preferred to capture the full covariance.
+- **$K$ large, $J$ large**: per-slot bound tightens uniformly; if the prior is factored (Case A), EB is asymptotically efficient. If the prior is coupled (Case B), the cross-slot interaction term decays at $J^{-1}$ but adds a constant overhead at any fixed $J$, advising caution.
+
+## **6.3. Caveat (Squared-Error Loss; Coverage Picture Unchanged)**
+
+As in v07 §7, Theorem 7C\* is for **squared-error loss on point estimates**. For interval coverage, Proposition 7B\* (§5) shows that EB systematically under-covers regardless of $K$ or $J$; the choice between EB and FB therefore depends on whether the user prioritizes point estimate accuracy under squared-error loss (EB acceptable for large $J$, possibly large $K$ under Case A) or coverage calibration (FB preferred uniformly).
+
+## **6.4. Reference**
+
+This is the standard compound decision result of Robbins (1956) extended to $K \geq 1$ slots. The per-slot bound of Case A is the routine slotwise application of Brown (2008) and Efron (2019, Theorem 1.1). The cross-slot residual of Case B is derived from the second-order Taylor expansion of the coupled prior's log-density at the truth and is, to the author's knowledge, not previously stated in this form in the literature; it is canonized here as the AMM specialization of the multi-hyperparameter compound decision setting.
+
+---
+
+# **7. Proposition 7D\* -- Substantial Discrepancy Conditions (Multivariate)**
+
+> **Proposition 7D\*.** EB and FB produce **substantially different posteriors** in any of the following regimes:
+>
+> **(i)\*** **Multimodal marginal likelihood for $\theta_{\mathrm{ref}}$ in $\mathbb{R}^p$.** When $L_n^{\mathrm{marg}}: \mathbb{R}^p \to \mathbb{R}$ has multiple local maxima, the EB estimator may converge to a non-global mode; FB integrates over all modes weighted by the prior. The probability of multimodality grows with $p$ under generic non-conjugacy: in $\mathbb{R}^p$, the number of saddle-points and local maxima of a generic smooth function scales (in the worst case) as $O(c^p)$ for some $c > 1$ (Morse-theoretic genericity). For $p \geq 3$ in non-conjugate settings, multimodality is the default rather than the exception, and the EB estimator's stability depends crucially on the multi-start strategy of §9 O5\*-EBFB.
+>
+> **(ii)\*** **Near-singular Fisher information matrix $I_{\theta\theta}^{\mathrm{marg}}$.** When the smallest eigenvalue $\lambda_p$ of $I_{\theta\theta}^{\mathrm{marg}}$ is small (formally, when the condition number $\kappa(I_{\theta\theta}^{\mathrm{marg}}) = \lambda_1 / \lambda_p \geq \kappa_{\mathrm{threshold}}$), the variance of $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$ along the eigenvector of $\lambda_p$ is large, and FB's integration over this variance produces a substantially wider posterior on $\xi$ along the same direction. The framework's library reports $\kappa(I_{\theta\theta}^{\mathrm{marg}})$ as a diagnostic and aborts with a `gdpar_eb_numerical_error` when $\kappa > \kappa_{\mathrm{threshold}}$ (default $10^{10}$, per Charter §2.8).
+>
+> **(iii)\*** **Strongly informative prior $\pi_\Theta$ in $\mathbb{R}^p$.** When the prior $\pi_\Theta$ has narrow support around $\theta_{\mathrm{ref}}^*$ in any direction (formally, the KL divergence from $\pi_\Theta$ to a flat prior on the same support is at least $\epsilon > 0$ in some coordinate), FB benefits from the prior information whereas EB ignores it; the FB posterior is concentrated more tightly on $\xi$ along the prior-informed direction.
+>
+> **(iv)\*** **Hierarchy with $\geq 3$ levels under $p > 1$ or $K > 1$.** When the model has three or more hierarchical levels (e.g., $\theta_{\mathrm{ref}}$ depends on a meta-hyperparameter $\theta_{\mathrm{meta}}$ which in turn depends on another), the EB-style point estimation cascades errors across levels. Under $p = K = 1$ the cascade is benign; under $p > 1$ or $K > 1$ the cascade compounds: the per-level Fisher information becomes a tensor and the multivariate Laplace approximation must be applied recursively at each level, with each application contributing $O(n^{-1})$ approximation error that accumulates additively across levels.
+>
+> In each regime, the framework recommends **FB by default**, with EB only when justified by computational considerations and accompanied by the under-coverage correction of Proposition 7B\* (§5).
+
+## **7.1. Reduction to v07's Proposition 7D under $(p, K) = (1, 1)$**
+
+Under $p = 1$ and $K = 1$, the four asterisked conditions reduce to v07's Proposition 7D conditions (i)--(iv) with the following correspondences:
+
+| v07 (scalar) | v07b (multivariate) | Remark |
+|:-------------|:--------------------|:-------|
+| (i) Small effective $n$ for $\theta_{\mathrm{ref}}$ (small $I_{\theta\theta}^{\mathrm{marg}}$) | (ii)\* Near-singular $I_{\theta\theta}^{\mathrm{marg}}$ (small $\lambda_p$) | v07 (i) becomes v07b (ii)\* with eigenvalue interpretation. |
+| (ii) Strongly informative prior | (iii)\* Strongly informative prior in $\mathbb{R}^p$ | KL-based directional generalization. |
+| (iii) Multimodal $L_n^{\mathrm{marg}}$ | (i)\* Multimodal in $\mathbb{R}^p$ | Genericity of multimodality scales with $p$. |
+| (iv) Misspecified lower-level prior $\pi_\xi$ | Subsumed by Proposition 7D\* (iv)\* and Open Question O3\*-EBFB | Misspecification is treated within the general hierarchical-cascade frame of (iv)\*. |
+
+The renumbering (v07's (iii) becomes v07b's (i)\*) reflects the ordering of practical importance in $\mathbb{R}^p$: multimodality is the most frequent failure mode of multivariate EB and is treated first.
+
+---
+
+# **8. Recommendation by Scenario (Multivariate Extension)**
+
+The framework's recommendation table of v07 §9 extends to the multivariate setting with explicit rows for $p$, $K$, and the product $K \cdot p$. The recommendation depends jointly on the sample size $n$, the number of within-slot exchangeable units $J$, the number of distributional slots $K$, the dimensionality $p$ of $\theta_{\mathrm{ref}}$, the smallest eigenvalue $\lambda_p(I_{\theta\theta}^{\mathrm{marg}})$, and the computational budget.
+
+| Scenario | $n$ | $J$ | $K$ | $p$ | $\lambda_p$ | Compute | Recommended | Reason |
+|:---------|:---:|:---:|:---:|:---:|:-----------:|:-------:|:-----------:|:-------|
+| Large $n$, large $J$, $K = 1$, $p = 1$, well-identified | Large | Large | 1 | 1 | Large | Tight | **EB** | v07 §9 row 1; Theorems 7A\*, 7C\* hold cleanly. |
+| Same but coverage critical | Large | Large | 1 | 1 | Large | Tight | **FB** | Proposition 7B\* coverage discrepancy. |
+| Large $n$, large $J$, $K \geq 2$ factored prior, $p$ small | Large | Large | $\geq 2$ | Small | Large | Tight | **EB** | Theorem 7C\* Case A slotwise compound decision. |
+| Large $n$, $K \cdot p$ moderate, well-conditioned $I_{\theta\theta}^{\mathrm{marg}}$ | Large | Large | $\geq 2$ | $\geq 2$ | Large | Tight | **EB** | Multivariate Theorem 7A\*; numerical regime well-conditioned. |
+| Large $n$, $K \cdot p$ large, near-singular $I_{\theta\theta}^{\mathrm{marg}}$ | Large | Large | Large | Large | Small | Any | **FB** | Proposition 7D\* (ii)\*; multivariate Laplace fails or under-covers severely. |
+| Moderate $n$, $K \geq 2$ coupled prior | Moderate | Moderate | $\geq 2$ | Any | Moderate | Moderate | **FB** | Theorem 7C\* Case B cross-slot residual non-negligible. |
+| Small $J$, small $K$, small $p$ | Small | Small | 1--2 | 1--2 | Small | Any | **FB** | Multiple conditions of Proposition 7D\* may apply jointly. |
+| Multimodal $L_n^{\mathrm{marg}}$ in $\mathbb{R}^p$ ($p \geq 3$) | Any | Any | Any | $\geq 3$ | Any | Any | **FB** | Proposition 7D\* (i)\*; multimodality default in $\mathbb{R}^{p \geq 3}$. |
+| Strong prior knowledge on $\theta_{\mathrm{ref}}$ in some direction | Any | Any | Any | Any | Any | Any | **FB** | Proposition 7D\* (iii)\*. |
+| Highly hierarchical (3+ levels) | Any | Any | Any | $\geq 2$ | Any | Any | **FB** | Proposition 7D\* (iv)\* cascade compounds. |
+
+The framework's **default remains FB** for all configurations. EB is offered as an explicit configuration option via `gdpar_eb()` (Charter §2.2) for cases where the analyst has determined that EB is preferred (computational constraints, methodological avoidance of priors on $\theta_{\mathrm{ref}}$, or large-$J$ slotwise compound decision settings under Case A of §6).
+
+**Multivariate-specific operational guidance** (not present in v07 §9):
+
+(a) **When $p \geq 3$ and no prior knowledge of multimodality**: always run `gdpar_eb()` with `laplace_control$multi_start_M = 10` (overriding the default of 5) to mitigate Proposition 7D\* (i)\*. The framework's library reports the inter-init dispersion in `gdpar_eb_fit$diagnostics$multi_start_dispersion`; a coefficient of variation $> 0.05$ across inits signals likely multimodality and warrants switching to FB.
+
+(b) **When $K \geq 3$ with heterogeneous families** (e.g., Beta + Gamma + Student-$t$): compute the condition number of each per-slot block of $I_{\theta\theta}^{\mathrm{marg}}$ independently; if any per-slot condition number exceeds $10^8$, abandon EB for that slot and fall back to FB on the full joint model.
+
+(c) **When the user has computational budget for both**: run `gdpar_eb()` first to obtain $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$ and use it as the initialization for FB sampling (`gdpar(init = ...)`), reducing the FB sampling time substantially. This is the recommended **EB-warm-start FB workflow** for $p \geq 2$.
+
+---
+
+# **9. Open Questions**
+
+Four open questions of v07 §10 (O1-EBFB through O4-EBFB) extend to the multivariate setting with the asterisked versions below, plus one new open question O5\*-EBFB specific to the numerical anti-fragility of multivariate Laplace under non-conjugacy.
+
+## **9.1. (O1\*-EBFB) Adaptive Choice between EB and FB Based on Data (Multivariate)**
+
+v07's O1-EBFB is the data-driven adaptive selection between EB and FB based on a diagnostic. The multivariate extension requires a diagnostic that **handles the multi-dimensional Fisher information**, the **per-slot block structure under $K > 1$**, and the **inter-init dispersion of multi-start Laplace**. A candidate diagnostic is the ratio of EB-side coverage gap $\mathrm{tr}(C_{g,\alpha}^*)/n$ (computable post-hoc from `gdpar_eb_fit`) to the FB-side variance of $g(\xi^*)$ obtained from a short pilot FB run; the framework will release a candidate diagnostic in Block 9.x as `gdpar_eb_diagnostic()` after sufficient empirical calibration. Partial work: Petrone--Rousseau--Scricciolo (2014, §7) discuss adaptive empirical Bayes in the abstract; the AMM specialization in $\mathbb{R}^p$ with heterogeneous slots is open.
+
+## **9.2. (O2\*-EBFB) Higher-Order Coverage Correction for Multivariate EB**
+
+v07's O2-EBFB is the search for higher-order corrections (Edgeworth-type, bootstrap-based) beyond the first-order Proposition 7B correction. The multivariate extension requires corrections that handle (i) the sandwich matrix form of $C_{g,\alpha}^*$, (ii) the per-slot tensor under $K > 1$, and (iii) the propagated uncertainty from the multi-start Laplace inter-init dispersion. Multivariate Edgeworth expansions are technically more delicate (Bhattacharya and Ghosh 1978; Hall 1992 Chapter 5) and bootstrap calibration in $\mathbb{R}^p$ requires more replications to control simulation noise. The framework's current implementation uses the first-order matrix correction (§5); higher-order corrections are deferred to Block 9.x.
+
+## **9.3. (O3\*-EBFB) Behavior under Model Misspecification (Multivariate)**
+
+v07's O3-EBFB is the question of which of EB or FB degrades more gracefully under misspecification. Under multivariate hyperparameter and heterogeneous slots, the question further refines: does misspecification of the per-slot prior $\pi_{\xi^{(k)}}$ in one slot affect the EB estimator of $\theta_{\mathrm{ref}}^{(k)}$ in **only that slot** (a slot-local insulation property of Case A of Theorem 7C\*) or **across slots** through the coupled prior of Case B? Partial empirical observation from the AMM regression tests (`tests/testthat/test-eb_misspecification.R` to be written in Sub-phase 8.6.D) will inform; full theoretical treatment is deferred.
+
+## **9.4. (O4\*-EBFB) Computational Competitiveness of FB at Moderate $n$ under $K \cdot p$ Large**
+
+v07's O4-EBFB is the question of when modern HMC narrows the computational gap enough to make FB the default even for very large $n$. The multivariate extension asks: how does the FB sampling time scale with the joint dimensionality $K \cdot p$? Empirical observation from Bloque 7 benches (5 species × 4 NE-USA sub-regions, single-slot $K = 1$, $p = 1$): the framework's FB sampling took $\sim 6600$ s vs.\ mgcv's $\sim 0.7$ s; under $K \cdot p \geq 4$ the gap may grow super-linearly. The threshold at which FB becomes infeasible per $K \cdot p$ is problem-dependent and remains open.
+
+## **9.5. (O5\*-EBFB) Numerical Anti-Fragility of Multivariate Laplace under Non-Conjugacy (New)**
+
+The **most important new open question raised by the multivariate extension** is the formal characterization of when `cmdstanr::laplace()` fails numerically in $\mathbb{R}^p$ under non-conjugate family + prior combinations. The failure modes are:
+
+- **Singular or ill-conditioned Hessian** of the marginal log-likelihood at the candidate $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$. The condition number $\kappa(H) = \lambda_1(H) / \lambda_p(H)$ controls the relative error of the inverse Hessian used in the Laplace approximation; when $\kappa(H) \gtrsim 10^{10}$, the Gaussian approximation around $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$ is unreliable and the EB credible intervals are invalid.
+- **Non-positive-definite Hessian** when the L-BFGS optimization converges to a saddle-point or to a local maximum of $L_n^{\mathrm{marg}}$ that is not a true global maximum.
+- **Multiple disconnected modes** when $L_n^{\mathrm{marg}}$ has more than one local maximum in $\mathbb{R}^p$ (recall §7 Proposition 7D\* (i)\*: multimodality is generic for $p \geq 3$ under non-conjugacy).
+- **Slow gradient decay along ridge directions** when one or more eigenvalues of the marginal Hessian are near zero, causing L-BFGS to oscillate rather than converge.
+
+The framework's anti-fragility strategy (canonized in Charter §2.8 of Sub-phase 8.6) addresses these four failure modes with four operational components:
+
+1. **Preventive detection of ill-conditioned Hessian.** Before accepting the output of `cmdstanr::laplace()`, the library computes the condition number $\kappa(H)$ of the marginal Hessian at the candidate $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$. If $\kappa(H) > \kappa_{\mathrm{threshold}}$ (default $10^{10}$, configurable via `laplace_control$kappa_threshold`), the EB fit aborts with class `gdpar_eb_numerical_error` and an explicit diagnostic message identifying the most poorly conditioned direction (via the eigenvector of $\lambda_p$).
+2. **Adaptive Levenberg-Marquardt ridge.** If $|\det(H)| < \epsilon_{\mathrm{LM}}$ (Hessian effectively singular) or $H$ is not positive-definite (a true Newton step would diverge), the library substitutes $H \leftarrow H + \lambda I$ with an adaptive ridge $\lambda$ chosen via the standard L-M heuristic (start with $\lambda_0 = \mathrm{tr}(H) \cdot 10^{-3}$; geometrically increase by 10 until $H + \lambda I$ is positive-definite with condition number below threshold; report the used $\lambda$ in `gdpar_eb_fit$diagnostics$lm_perturbation`).
+3. **Multiple random restarts.** The L-BFGS optimization is restarted from $M$ independent random inits within a bounding box derived from the prior $\pi_\Theta$ (default $M = 5$; configurable via `laplace_control$multi_start_M$`). The library retains the init that maximizes the marginal log-likelihood and reports the inter-init dispersion (coefficient of variation of marginal log-likelihood at each converged init) in `gdpar_eb_fit$diagnostics$multi_start_dispersion`. A coefficient of variation $> 0.05$ across inits signals likely multimodality and the library issues a `gdpar_diagnostic_warning` advising the user to consider FB.
+4. **Documented fallback.** If all $M$ inits fail (all produce singular Hessian or all diverge), `gdpar_eb()` aborts with class `gdpar_unsupported_feature_error` and a diagnostic message recommending the user to use `gdpar()` (FB) instead. The library never returns a silently invalid estimator.
+
+The **formal characterization** of the conditions under which `cmdstanr::laplace()` fails (independent of the empirical heuristics above) is open. A candidate framework is to express failure as a function of two intrinsic quantities of the AMM specification: (a) the condition number $\kappa(I_{\theta\theta}^{\mathrm{marg}})$ of the population Fisher matrix, and (b) the **Morse index spread** of $L_n^{\mathrm{marg}}$ in $\mathbb{R}^p$ (the variance of the number of negative eigenvalues of the Hessian across the interior of the admissible domain $\Theta$). A precise theorem of the form "if $\kappa \leq \kappa_*(p)$ and Morse spread $\leq \mu_*(p)$, then Laplace succeeds with probability $\geq 1 - \delta_n(p)$ where $\delta_n(p) = O(n^{-1/p})$" is the open form; the constants $\kappa_*(p)$, $\mu_*(p)$, and $\delta_n(p)$ are unknown for general non-conjugate AMM specifications and require systematic empirical-and-theoretical investigation. This is the primary open theoretical question that motivates the anti-fragility strategy as a working substitute pending formal resolution.
+
+---
+
+# **10. Connections to Subsequent Blocks**
+
+The multivariate extension of this vignette feeds into the operational implementation in five concrete artifacts of Sub-phase 8.6 (Charter §3.2--§3.5):
+
+- **`gdpar_eb()` (Sub-phase 8.6.B)**: the orchestrator function exposing the EB workflow to the user. The function signature is documented in Charter §2.2 and includes the `eb_correction` argument (defaulting to `TRUE`, implementing the correction of §5 of this vignette) and the `laplace_control` argument (implementing the anti-fragility strategy of §9 O5\*-EBFB).
+
+- **`vop07_eb_workflow.Rmd` (Sub-phase 8.6.E)**: the operational companion vignette to this theoretical extension. Whereas the present vignette establishes the theoretical foundations of multivariate EB, `vop07` walks the user through the operational workflow (data preparation, `gdpar_eb()` call, interpretation of diagnostics, EB-vs-FB comparison) with executable code examples. The two vignettes are read together: theory in v07b, practice in vop07.
+
+- **`gdpar_compare_eb_fb()` (Sub-phase 8.6.E)**: the comparator function that takes an EB fit and an FB fit and reports the empirical total variation distance between $\Pi_n^{\mathrm{EB}}$ and $\Pi_n^{\mathrm{FB}}$ over $\xi$, the empirical coverage discrepancy of nominal credible intervals (verifying Proposition 7B\* of §5), and a side-by-side diagnostic table. Symmetric with `gdpar_compare_meta_learners` of Sub-phase 8.5.B (canonized in v08c).
+
+- **`inst/stan/amm_eb_marginal.stan` and `inst/stan/amm_eb_conditional.stan` (Sub-phase 8.6.B)**: two new Stan templates dedicated to EB, written multivariate-capable from the start per Charter §2.7. The marginal template treats $\theta_{\mathrm{ref}}$ as a free parameter (vector or full tensor) and computes the marginal log-likelihood via `cmdstanr::laplace()`; the conditional template treats $\theta_{\mathrm{ref}}$ as data (the plug-in $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$) and samples $\xi$ via HMC. The templates extend the existing FB templates (originally `amm_main.stan` and `amm_distrib_multi.stan`, plus `amm_distrib_K.stan`) without replacing or unifying them, preserving the bit-exactness of the FB goldens established in Sub-phases 8.3.X (goldens that are not re-bootstrapped in Sub-phase 8.6). Sub-sub-fase 9.3.a (Block 9, Session B9.3, 2026-05-27) subsequently unified the two K = 1 FB templates `amm_main.stan` and `amm_distrib_multi.stan` at the R-side codegen layer (lateral decision B.iv) via the dispatcher `.gdpar_emit_canonical_stan()`, relocating the byte-identical pieces to `inst/stan/_canonical_pieces/`; the EB-side templates remain at `inst/stan/` root pending the parallel cascade in Block 9.5+.
+
+- **Block 9.x (post-release)**: the formal characterization of O5\*-EBFB (numerical anti-fragility) is deferred to Block 9.x as an open research direction. Block 9.x also receives the operational diagnostic `gdpar_eb_diagnostic()` from O1\*-EBFB (adaptive choice) and the higher-order coverage corrections from O2\*-EBFB.
+
+The reader is referred to `vop07_eb_workflow.Rmd` (Sub-phase 8.6.E) for the operational reading of the present theoretical results and to the Sub-phase 8.6 charter (`CHARTER_SUBFASE_8_6.md`) for the full implementation roadmap.
+
+---
+
+# **11. Joint Kernel Stein Discrepancy: the `gdpar_ksd_joint()` Helper**
+
+Sub-bloque 9.3.c (Bloque 9, Sesión B9.4, 2026-05-27) operationalizes the open question raised in the Roxygen of `gdpar_compare_eb_fb()`: the marginal total-variation distance returned by that comparator is only a coarse proxy of the distributional discrepancy between $\Pi_n^{\mathrm{EB}}$ and $\Pi_n^{\mathrm{FB}}$, since it does not detect deviations in the *joint dependence* structure of $\xi = (a, b, W, \mathrm{dispersion})$. The kernel Stein discrepancy (KSD) of Gorham and Mackey (2017) and Liu, Lee, and Jordan (2016) provides the canonical *density-free spectral metric* on a high-dimensional joint posterior.
+
+## **11.1. The Stein Operator and the Stein Kernel**
+
+For a target distribution $p$ with score function $s_p(x) = \nabla_x \log p(x)$, the Stein operator $\mathcal{A}_p$ acting on a vector-valued function $f$ is
+$$\mathcal{A}_p f(x) \;=\; \langle s_p(x), f(x) \rangle + \nabla \cdot f(x).$$
+Stein's identity asserts $\mathbb{E}_{x \sim p}[\mathcal{A}_p f(x)] = 0$ for all $f$ in a sufficiently smooth class. Given a base reproducing kernel $k(x, y)$, the *Stein kernel* is
+$$k_p(x, y) \;=\; \langle s_p(x), s_p(y) \rangle k(x, y) + \langle s_p(x), \nabla_y k(x, y) \rangle + \langle s_p(y), \nabla_x k(x, y) \rangle + \mathrm{tr}\!\left(\nabla_x \nabla_y^{\top} k(x, y)\right),$$
+and the KSD of a sample $\{x_i\}_{i=1}^n \sim Q$ from a target $p$ is the V-statistic
+$$\mathrm{KSD}(Q, p) \;=\; \sqrt{\max\!\left\{ 0,\; \tfrac{1}{n^2} \sum_{i, j} k_p(x_i, x_j) \right\}}.$$
+A value close to zero indicates $Q$ is well-aligned with $p$; positive values indicate joint distributional deviation.
+
+## **11.2. Empirical Gaussian Target (B9.4 iteration) and Future Extension**
+
+The KSD requires the score of the *target*. In this iteration the target is the *empirical Gaussian Laplace approximation* of the FB posterior over the common $\xi$-variables: $\hat\mu = \mathbb{E}^{\mathrm{FB}}[\xi]$, $\hat\Sigma = \mathrm{Cov}^{\mathrm{FB}}(\xi)$, so the Gaussian score is the linear closed-form
+$$s(x) \;=\; -\hat\Sigma^{-1}(x - \hat\mu).$$
+The implementation evaluates $\mathrm{KSD}(\Pi_n^{\mathrm{EB}}, \mathcal{N}(\hat\mu, \hat\Sigma))$ in closed form (no auxiliary MCMC required for the target score). This is sufficient to detect EB-vs-FB deviations of joint *first- and second-order moment structure*. The full-KSD variant against the actual FB target via the Stan model's `grad_log_prob()` method (a one-sample KSD of EB samples against the true non-Gaussian FB posterior) is a documented extension reserved for Block 9.x.
+
+## **11.3. Base Kernel and Bandwidth**
+
+The default base kernel is the inverse multi-quadric (IMQ) of Gorham-Mackey
+$$k(x, y) \;=\; \left(h + \|x - y\|^2\right)^{\beta}, \qquad \beta \in (-1, 0), \quad \beta_{\mathrm{default}} = -\tfrac{1}{2},$$
+which is the canonical choice for distinguishing distributions whose densities differ in *tails*: Gorham-Mackey Theorem 8 establishes that the IMQ kernel detects mismatch with a dimension-*independent* rate for log-concave targets, a property the RBF kernel $k(x, y) = \exp(-\|x - y\|^2 / (2 h))$ does not enjoy. The bandwidth $h$ (in squared units of $x$) defaults to the *median heuristic*: $h = \mathrm{median}\!\left( \{ \|x_i - x_j\|^2 \}_{i < j} \right)$ over the FB sample, which is dimension-adaptive. A fixed bandwidth is also accepted as a configuration option.
+
+## **11.4. ESS-Weighted Variant**
+
+When MCMC chains are short relative to the integrated autocorrelation time of $\xi$, the V-statistic $\tfrac{1}{n^2}\sum_{i,j} k_p(x_i, x_j)$ understates the asymptotic KSD because successive draws are not independent. The `ess_weighted = TRUE` variant addresses this by thinning both EB and FB samples to $\min(\widehat{\mathrm{ESS}}_{\mathrm{EB}}, \widehat{\mathrm{ESS}}_{\mathrm{FB}})$ rows (per-variable basic ESS via `posterior::ess_basic`), yielding an unbiased V-statistic on the thinned samples. The thinning seed is user-configurable for reproducibility.
+
+## **11.5. Operational Reading: `gdpar_compare_eb_fb` and `gdpar_ksd_joint` are Complementary**
+
+The two diagnostics measure orthogonal aspects of the EB-vs-FB discrepancy:
+
+- `gdpar_compare_eb_fb()` returns a *marginal-by-parameter* TV table: $\widehat{\mathrm{TV}}(\Pi_n^{\mathrm{EB}, k}, \Pi_n^{\mathrm{FB}, k})$ for each scalar parameter $k$ separately. This detects deviations in *univariate marginals* but is blind to joint dependence (e.g., two EB and FB posteriors with identical marginals but different correlation structure give the same marginal TV).
+
+- `gdpar_ksd_joint()` returns a *single joint* KSD scalar that integrates over the full joint $\xi$-vector. This detects deviations in the joint dependence structure (correlations, copula geometry) that the marginal TV misses, at the cost of a coarser per-parameter resolution.
+
+The recommended operational reading is to compute both: a small marginal TV plus a large joint KSD is the signature of an *EB approximation that gets the per-coordinate spread right but distorts the cross-coordinate correlations*. The converse (large marginal TV, small joint KSD) is uncommon in practice but indicates per-coordinate location/scale deviations that nevertheless preserve the joint dependence skeleton.
+
+---
+
+# **12. Summary**
+
+This vignette has extended the four central results of v07 (Theorem 7A scalar first-order equivalence; Proposition 7B scalar higher-order coverage; Theorem 7C scalar compound decision; Proposition 7D scalar substantial-discrepancy conditions) to the full $p \geq 1$, $K \geq 1$ regime, under strictly stronger hypotheses (EB-MARG-ID)$_p$, (PRIOR-FB-WEAK)$_p$, (HIER-COMPLEX)$_p$.
+
+The four asterisked results --- Theorem 7A\* (§4), Proposition 7B\* (§5), Theorem 7C\* (§6), Proposition 7D\* (§7) --- each reduce to their v07 counterparts under $(p, K) = (1, 1)$ as corollaries, ensuring that v07 remains the canonical scalar single-slot statement for pedagogical entry and that this vignette is a strict extension rather than a rewriting.
+
+The critical audit of v07 §5 (§§1.1 and 4.5 of this vignette) confirmed that the scalar proof transfers cleanly to $\mathbb{R}^p$ under the strengthened hypotheses, with no implicit use of strictly-scalar properties. The pedagogical opacity of v07 §6 regarding the sensitivity Jacobian $J^\xi$ has been made explicit in the matrix form of Proposition 7B\* (§5).
+
+A new open question O5\*-EBFB (§9) on the numerical anti-fragility of multivariate Laplace under non-conjugacy is canonized as the primary theoretical question motivating the four-component anti-fragility strategy (Charter §2.8) that the framework implements in Sub-phase 8.6.B. The formal theorem characterizing when `cmdstanr::laplace()` succeeds in $\mathbb{R}^p$ is open and deferred to Block 9.x.
+
+The framework's recommendation (§8) **remains FB by default** across all multivariate configurations, with EB available as an explicit configuration option via `gdpar_eb()` for scenarios in which the multivariate Theorems 7A\* and 7C\* and the well-conditioned eigenvalue regime of (EB-MARG-ID)$_p$ all align favorably. The user is referred to the operational vignette `vop07_eb_workflow.Rmd` (Sub-phase 8.6.E) for the practical workflow.
+
+---
+
+# **Appendix A. Notation Correspondence: Multivariate vs.\ Scalar**
+
+Per Charter §3.1 (Sub-phase 8.6) Appendix A specification: tabular equivalence between v07's scalar notation and v07b's multivariate notation under the restriction $p = 1$, $K = 1$.
+
+| v07 (scalar, $p = K = 1$) | v07b (multivariate, general $p$, $K$) | Reduction under $p = K = 1$ |
+|:--------------------------|:--------------------------------------|:----------------------------|
+| $\theta_{\mathrm{ref}} \in \mathbb{R}$ | $\theta_{\mathrm{ref}} \in \mathbb{R}^{J \times K \times p}$ | Reduces to $\theta_{\mathrm{ref}} \in \mathbb{R}^J$ ($J$ groups) or $\mathbb{R}$ ($J = 1$). |
+| $I_{\theta\theta}^{\mathrm{marg}} \in \mathbb{R}_{>0}$ | $I_{\theta\theta}^{\mathrm{marg}} \in \mathbb{R}^{p \times p}$ PD | Scalar Fisher info as $1 \times 1$ matrix. |
+| $\mathrm{Var}_n / \mathrm{Var}_\pi$ | $\mathrm{tr\,Cov}_n / \mathrm{tr\,Cov}_\pi$ | Trace of $1 \times 1$ matrix = its scalar entry. |
+| Scalar Jacobian $\partial \xi^* / \partial \theta_{\mathrm{ref}}$ (implicit) | $J^\xi \in \mathbb{R}^{\dim(\xi) \times p}$ explicit | $1 \times 1$ scalar absorbed in constant. |
+| $C_{g, \alpha} = (g'(\xi^*))^2 / I_{\theta\theta}^{\mathrm{marg}} \cdot \kappa(\alpha)$ | $C_{g, \alpha}^* = \kappa(\alpha) (J^\xi)^\top \nabla_\xi g (\nabla_\xi g)^\top J^\xi (I_{\theta\theta}^{\mathrm{marg}})^{-1}$ | Sandwich reduces to scalar product. |
+| TV on $\mathbb{R}^{\dim(\xi)}$ (Regime A) | TV on $\mathbb{R}^{\dim(\xi)}$ (Regime A, any $p$) | Independent of $p$; depends on $\dim(\xi)$. |
+| Weak metric on $\mathcal{G}$ (Regime B) | Weak metric on $\mathcal{G}$ (Regime B, any $p$) | Independent of $p$; depends on $\dim(\xi)$. |
+| Compound decision indexed by $K$ (in v07's notation) | Compound decision indexed by $J$ within slot $k$, summed over $K$ slots | v07's $K$ in Theorem 7C = within-slot $J$ in v07b. |
+
+---
+
+# **Appendix B. Hypothesis Table (Multivariate)**
+
+Per Charter §3.1 (Sub-phase 8.6) Appendix B specification: tabular summary of the asterisked hypotheses of §3, with their content, scope of use across §§4--7, and reduction to v07's scalar versions.
+
+| Hypothesis | Content | Used by | Reduction under $p = K = 1$ |
+|:-----------|:--------|:--------|:----------------------------|
+| (EB-MARG-ID)$_p$ | $L_n^{\mathrm{marg}}$ has unique global max in $\mathbb{R}^p$; $I_{\theta\theta}^{\mathrm{marg}}$ positive definite (all $\lambda > 0$) | Theorems 7A\*, 7B\*, 7C\*; Proposition 7D\* (ii)\* | v07 (EB-MARG-ID): scalar info positive |
+| (PRIOR-FB-WEAK)$_p$ | $\mathrm{tr\,Cov}_n(\theta_{\mathrm{ref}}^*) / \mathrm{tr\,Cov}_\pi(\theta_{\mathrm{ref}}) \to 0$ | Theorem 7A\*; Proposition 7D\* (iii)\* | v07 (PRIOR-FB-WEAK): scalar variance ratio $\to 0$ |
+| (HIER-COMPLEX)$_p$ | $\log L_n^{\mathrm{marg}}$ is $C^2$ in a $p$-ball around $\widehat{\theta}_{\mathrm{ref}}^{\,\mathrm{EB}}$; Hessian bounded uniformly in $n$; $p$ fixed as $n$ grows | Theorems 7A\*, 7B\*; Proposition 7D\* (iv)\* | v07 (HIER-COMPLEX): $C^2$ on interval; bounded scalar dimension |
+
+---
+
+# **References Cited in This Block**
+
+Bhattacharya, R. N., and Ghosh, J. K. (1978). On the validity of the formal Edgeworth expansion. *Annals of Statistics*, 6(2), 434--451.
+
+Bickel, P. J., and Ghosh, J. K. (1990). A decomposition for the likelihood ratio statistic and the Bartlett correction --- a Bayesian argument. *Annals of Statistics*, 18(3), 1070--1090.
+
+Brown, L. D. (2008). In-season prediction of batting averages: a field test of empirical Bayes and Bayes methodologies. *Annals of Applied Statistics*, 2(1), 113--152.
+
+Carlin, B. P., and Gelfand, A. E. (1990). Approaches for empirical Bayes confidence intervals. *Journal of the American Statistical Association*, 85(409), 105--114.
+
+Castillo, I., and Rousseau, J. (2015). A Bernstein--von Mises theorem for smooth functionals in semiparametric models. *Annals of Statistics*, 43(6), 2353--2383.
+
+Efron, B. (2019). Bayes, oracle Bayes, and empirical Bayes. *Statistical Science*, 34(2), 177--201.
+
+Ghosal, S., and van der Vaart, A. W. (2017). *Fundamentals of Nonparametric Bayesian Inference*. Cambridge University Press.
+
+Hall, P. (1992). *The Bootstrap and Edgeworth Expansion*. Springer Series in Statistics.
+
+Laird, N. M., and Louis, T. A. (1987). Empirical Bayes confidence intervals based on bootstrap samples. *Journal of the American Statistical Association*, 82(399), 739--750.
+
+Petrone, S., Rousseau, J., and Scricciolo, C. (2014). Bayes and empirical Bayes: do they merge? *Biometrika*, 101(2), 285--302.
+
+Robbins, H. (1956). An empirical Bayes approach to statistics. *Proceedings of the Third Berkeley Symposium on Mathematical Statistics and Probability*, vol. 1, 157--163.
+
+Rousseau, J., and Szabo, B. (2017). Asymptotic behaviour of the empirical Bayes posteriors associated to maximum marginal likelihood estimator. *Annals of Statistics*, 45(2), 833--865.
+
+Szabo, B., van der Vaart, A. W., and van Zanten, J. H. (2013). Empirical Bayes scaling of Gaussian priors in the white noise model. *Electronic Journal of Statistics*, 7, 991--1018.
+
+Tierney, L., and Kadane, J. B. (1986). Accurate approximations for posterior moments and marginal densities. *Journal of the American Statistical Association*, 81(393), 82--86.
+
+van der Vaart, A. W. (1998). *Asymptotic Statistics*. Cambridge University Press. [Chapters 10 (multivariate Bernstein--von Mises) and 16 (asymptotics for estimating equations).]
+
+van der Vaart, A. W., and van Zanten, J. H. (2008). Rates of contraction of posterior distributions based on Gaussian process priors. *Annals of Statistics*, 36(3), 1435--1463.
+
+White, H. (1982). Maximum likelihood estimation of misspecified models. *Econometrica*, 50(1), 1--25.

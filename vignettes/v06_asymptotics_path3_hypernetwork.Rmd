@@ -1,0 +1,449 @@
+---
+title: "**Theoretical Addendum -- Block 6:**"
+subtitle: "Asymptotic Theory for Path 3 (Hypernetwork): Partial Results and Open Questions"
+author: "**José Mauricio Gómez Julián**"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    theme: cosmo
+    highlight: tango
+    df_print: kable
+    mathjax: default
+  word_document:
+    toc: true
+    toc_depth: 4
+vignette: >
+  %\VignetteIndexEntry{Asymptotic Theory for Path 3 (Hypernetwork)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+---
+
+# **1. Purpose**
+
+Block 4 developed the asymptotic theory of Path 1 (hierarchical Bayesian via Stan). Block 5 developed the parallel theory of Path 2 (varying-coefficient via penalized splines). This block addresses **Path 3 (hypernetwork via `torch`)**, which is the **least mature** of the three paths from the standpoint of formal asymptotic theory.
+
+**The honest position is the following.** The asymptotic theory of Bayesian neural networks (BNNs) and, more broadly, of neural-network-based estimators in the regime relevant to Path 3 is an **active area of research with substantial open questions**. Several useful partial results exist ---NTK consistency in the lazy regime, PAC-Bayes generalization bounds, infinite-width Gaussian-process limits--- but **a closed asymptotic theory parallel to Theorems 4A-4C of Block 4 or Theorems 5A-5C of Block 5 is not currently available** for the hypernetwork form of Path 3.
+
+This block adopts a deliberately modest format:
+
+- **§3** identifies the three asymptotic layers (consistency, rate, BvM analog) and **explicitly notes which layers Path 3 covers in part and which remain open**.
+- **§4** nominates the standing hypotheses specific to neural-network estimation (architecture, prior, optimizer, regime).
+- **§5-§8** state four **partial results** ---each adapted from the cited literature--- that cover specific regimes of Path 3 with explicit hypotheses and explicit limitations.
+- **§10** is a **substantive list of seven open questions** that the framework does not close, with explicit reference to active research and recommendations for users.
+- **§11** ties the partial results to the empirical discrimination protocol of Block 1 §6.8.1, which is the operational mechanism by which Path 3's gaps are surfaced.
+
+The block does not pretend to give a complete asymptotic theory of Path 3. It gives what is currently established, marks what is conjectural, and explicitly recognizes the open frontier.
+
+> **Implementation status (`gdpar 0.0.0.9001`).** Path 3 (hypernetwork via `torch`) is **not currently implemented** in the package. A call to `gdpar(..., path = "hyper")` aborts with a `gdpar_unsupported_feature_error` (see `R/gdpar.R`). The asymptotic theory developed below is reference-grade for the framework's hypernetwork target; the implementation notes in §11 are written in prospective voice ("the planned implementation will...") because the operational layer is queued for a future version of `gdpar` and the present block does not assume its availability.
+
+---
+
+# **2. Setting and Notation**
+
+## **2.1. The Path 3 Model**
+
+Path 3 fits the AMM Level $\infty$ specification in which the deviation function components are realized by **feedforward neural networks**:
+
+$$\theta_i \;=\; \theta_{\text{ref}} + a_\phi(x_i) + b_\phi(x_i) \odot \theta_{\text{ref}} + W_\phi(\theta_{\text{ref}}) x_i,$$
+
+where $a_\phi: \mathcal{X} \to \mathbb{R}^p$, $b_\phi: \mathcal{X} \to \mathbb{R}^p$, $W_\phi: \Theta \to \mathbb{R}^{p \times d}$ are sub-networks with combined parameters $\phi \in \mathbb{R}^P$, with $P$ typically $\gg n$ in modern deep learning practice.
+
+The **realized function** is
+$$\Phi_\phi(x, \theta) \;=\; a_\phi(x) + b_\phi(x) \odot \theta + W_\phi(\theta) x,$$
+mapping $\mathcal{X} \times \Theta \to \mathbb{R}^p$. By Proposition 1F of Block 1, **$\Phi_\phi$ is the object of inference**, not $\phi$, and identifiability claims are at the level of $L^2(\mu \otimes \pi_\Theta)$ equivalence under (D-ID).
+
+Training proceeds by either:
+
+- **Stochastic gradient descent (SGD)** on a regularized empirical risk,
+$$\widehat\phi_n \;=\; \mathop{\arg\min}_\phi \;\sum_{i=1}^n -\log p(y_i \mid \theta_i^\phi(x_i, \theta_{\text{ref}})) + \mathcal{R}(\phi),$$
+with $\mathcal{R}$ a regularizer enforcing (C1)-(C4) of Block 1 plus standard weight decay; or
+
+- **Bayesian inference over $\phi$** via stochastic variational inference (SVI) or Hamiltonian Monte Carlo on the posterior
+$$\Pi_n(\phi \mid Y_{1:n}, X_{1:n}) \propto \pi(\phi) \prod_i p(y_i \mid \theta_i^\phi(x_i, \theta_{\text{ref}})),$$
+with $\pi(\phi)$ a prior on the network parameters.
+
+The framework's Path 3 implementation supports both modes; the asymptotic theory below is stated for whichever applies, with explicit indication.
+
+## **2.1.1. Two design regimes (parallel to Blocks 4-5)**
+
+**(R-RANDOM) Random design.** $(X_1, \theta_{\text{ref}}, Y_1), \ldots$ i.i.d. from the joint distribution induced by $X \sim \mu$, $\theta_{\text{ref}} \sim \pi_\Theta$, and $Y \mid X, \theta_{\text{ref}} \sim \mathcal{D}(\theta_*(X, \theta_{\text{ref}}))$.
+
+**(R-COND) Fixed/conditional design.** Conditional on $\{X_i\}_{i=1}^n$ (and on the prior draws of $\theta_{\text{ref}}$ in the Bayesian variant), with asymptotic statements for $\mu^\infty$-a.e. realization.
+
+The (R-EQUIV) bridge condition introduced in Block 4 §2.1.1 ---random-conditional equivalence under a uniform Glivenko-Cantelli condition on the function classes--- applies in principle to Path 3 as well, but with the **additional caveat** that uniform-class conditions are **non-trivial for neural-network function classes** and are **not** automatic as they are for finite-dim parametric or spline classes; this is part of the open-questions list (§10, (O1-Path3)).
+
+## **2.2. Regimes of Asymptotic Analysis**
+
+Asymptotic analysis of neural networks separates into qualitatively distinct regimes, each with its own theory and limitations:
+
+- **Lazy / NTK regime**: training is approximated by linear regression in the Neural Tangent Kernel space (Jacot, Gabriel, and Hongler 2018). Valid in the infinite-width or large-width limit with appropriate parameter scaling and small initial parameters.
+- **Mean-field regime**: training dynamics are characterized by a partial differential equation on the distribution of weights (Mei, Montanari, and Nguyen 2018; Chizat and Bach 2018). Different scaling, different theory.
+- **Finite-width / fixed-architecture regime**: the network has a fixed number of parameters $P$; standard parametric asymptotics could in principle apply but face the difficulty that $P$ often exceeds $n$.
+- **Infinite-width / Gaussian-process limit**: the prior over $\phi$ induces, in the infinite-width limit, a Gaussian process prior over $\Phi_\phi$ (Lee et al. 2018; Matthews et al. 2018). The fitted posterior coincides with Gaussian process regression with the NNGP kernel.
+
+These are **the four sub-regimes considered in the present framework**, chosen as the regimes most relevant for the implementation of Path 3 and most developed in the literature. The list is **not exhaustive of all regimes treated in the broader neural-network asymptotics literature**: hybrid regimes (e.g., depth-to-infinity at fixed width; structured-perturbation NTK; anisotropic mean-field) and non-asymptotic finite-width refinements exist and may be relevant in specialized applications. Each of the partial theorems in §5-§8 specifies which regime it applies to; no single theorem covers all regimes treated here.
+
+## **2.3. Distance and Notation**
+
+The natural distance for Path 3 is $L^2(\mu \otimes \pi_\Theta)$ on the realized function:
+$$d_{L^2}(\Phi, \Phi') \;=\; \Bigl( \int \|\Phi(x, \theta) - \Phi'(x, \theta)\|^2 \, d\mu(x) \, d\pi_\Theta(\theta) \Bigr)^{1/2}.$$
+
+This is the metric in which Proposition 1F of Block 1 establishes identifiability of $\Phi_\phi$ up to equivalence. Pointwise and sup-norm metrics on $\Phi_\phi$ are also useful for diagnostic purposes but require stronger regularity.
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $\Phi_\phi$ | Realized function of the hypernetwork, $\mathcal{X} \times \Theta \to \mathbb{R}^p$ |
+| $\Phi_*$ | True realized function at $\eta_*$ |
+| $\widehat\phi_n$ | Trained network parameters at sample size $n$ |
+| $\widehat\Phi_n = \Phi_{\widehat\phi_n}$ | Trained realized function |
+| $\pi(\phi)$ | Prior on network parameters (Bayesian variant) |
+| $\Pi_n(\phi \mid \cdot)$ | Posterior on network parameters |
+| $\mathrm{NTK}$ | Neural Tangent Kernel |
+| $\mathrm{NNGP}$ | Neural Network Gaussian Process kernel |
+| $P$ | Number of network parameters (often $\gg n$) |
+| $L$ | Network depth |
+| $W_\ell$ | Width of layer $\ell$ |
+
+---
+
+# **3. Three Asymptotic Layers and Their Status for Path 3**
+
+Parallel to Blocks 4-5:
+
+- **(L1) Function-level consistency.** As $n \to \infty$, $\widehat\Phi_n \to \Phi_*$ in $d_{L^2}(\mu \otimes \pi_\Theta)$ or in a weaker function-space metric.
+- **(L2) Convergence rate.** A sequence $r_n \to 0$ with $d_{L^2}(\widehat\Phi_n, \Phi_*) = O_P(r_n)$.
+- **(L3) BvM analog.** A limiting distributional statement for $\widehat\Phi_n$ (Bayesian posterior; or asymptotic distribution of the trained estimator).
+
+**Status of each layer for Path 3:**
+
+| Layer | Status | Reference for partial result | Open questions |
+|:-----:|:-------|:----------------------------:|:--------------|
+| (L1) | **Partial**: established under NTK regime (Theorem 6A) and under fixed architecture with strong conditions (Proposition 6D). General $L^2(\mu \otimes \pi_\Theta)$ consistency for arbitrary architecture and SGD optimizer is **not closed**. | Jacot et al. 2018; Hron et al. 2020 | (O1-Path3) |
+| (L2) | **Partial**: NTK regime gives a kernel-regression rate (Theorem 6A). Finite-sample PAC-Bayes generalization bounds (Theorem 6B) provide non-asymptotic risk control but not contraction rates. **Adaptive contraction rates for general BNNs are not closed.** | Jacot et al. 2018; Dziugaite and Roy 2017 | (O2-Path3), (O3-Path3) |
+| (L3) | **Largely open.** Infinite-width Gaussian-process limit (Proposition 6C) characterizes the **prior** rather than the posterior. Function-level BvM for the trained network is **not closed**. | Lee et al. 2018; Matthews et al. 2018 | (O4-Path3) |
+
+The framework reports this status explicitly to the user when Path 3 is invoked, and supplements the partial asymptotic theory with the **empirical discrimination protocol of Block 1 §6.8.1** (four-step test of stability across seeds, OOS comparison, calibration, component-wise divergence) as the operational substitute for closed asymptotic guarantees.
+
+---
+
+# **4. Standing Asymptotic Hypotheses for Path 3**
+
+In addition to (C1)-(C6), (LIN), (D-ID) of Block 1 (with (LIN) **failing** for Path 3 ---as already noted in Proposition 1F--- so identifiability is at the function level), and (HOM), (REG), (IID) of Block 2:
+
+**(NN-ARCH) Architecture.** The hypernetwork has finite depth $L$ and per-layer widths $W_1, \ldots, W_L$. Activation functions are smooth (e.g., GELU, softplus) or piecewise-linear (ReLU); the framework defaults to GELU for differentiability of the activation in the asymptotic analysis.
+
+**(NN-PRIOR-SCALE) Prior scaling.** Network weights at layer $\ell$ have prior variance scaling as $\sigma_\ell^2 / W_\ell$ (NTK parametrization) or $\sigma_\ell^2 / W_\ell^2$ (mean-field parametrization). The choice of scaling determines the limiting regime as widths grow.
+
+**(NN-OPT) Optimization regularity.** The optimizer (SGD with momentum, Adam, or Hamiltonian Monte Carlo) converges to a stationary point or, in the Bayesian variant, samples from the posterior asymptotically. This is a non-trivial assumption for non-convex losses; in practice, multiple restarts and convergence diagnostics are used as proxy verification.
+
+**(NN-LIM) Limiting regime.** One of:
+
+- **(NN-LIM-NTK)** NTK regime: width $\to \infty$ with NTK parametrization, training step size $\to 0$, training time finite. Lazy training; trained network behaves like kernel regression.
+- **(NN-LIM-MF)** Mean-field regime: width $\to \infty$ with mean-field parametrization. Different limiting dynamics.
+- **(NN-LIM-FIX)** Fixed architecture: $L$ and $W_\ell$ fixed; standard parametric asymptotics in $\phi \in \mathbb{R}^P$.
+- **(NN-LIM-INF-W)** Infinite-width Gaussian process: $W_\ell \to \infty$, prior on $\phi$ induces Gaussian process prior on $\Phi_\phi$.
+
+The four sub-regimes are **mutually exclusive and exhaustive of the regimes treated in the literature**. The framework does not assume one over the others; the user (or an empirical diagnostic) selects the regime appropriate to the problem and architecture.
+
+---
+
+# **5. Theorem 6A: Consistency under the NTK Regime (Partial)**
+
+> **Theorem 6A. Stated under (R-RANDOM) and (NN-LIM-NTK).** Suppose:
+>
+> - The network architecture (NN-ARCH) and prior scaling (NN-PRIOR-SCALE) are NTK-compatible.
+> - Training proceeds via gradient descent (or its Bayesian analog) in the lazy regime: width $\to \infty$, step size $\to 0$, $T$ training iterations finite.
+> - Standard regularity on the loss and the data distribution.
+>
+> Then **two distinct limits hold**, with **distinct hypotheses**:
+>
+> **Limit (i): Trained network $\to$ NTK kernel-regression solution.**
+>
+> The trained network's realized function converges, in the NTK limit, to the kernel-regression solution:
+> $$\widehat\Phi_n \;\xrightarrow{P}\; \Phi^{\mathrm{NTK}}_n \;=\; \mathop{\arg\min}_{\Phi \in \mathrm{RKHS}(\mathrm{NTK})} \;\frac{1}{n} \sum_i \mathcal{L}(Y_i, \Phi(X_i, \theta_{\text{ref}})) + \tau \|\Phi\|^2_{\mathrm{RKHS}},$$
+> for an appropriate regularization $\tau$ determined by the early-stopping schedule. This convergence is the content of Jacot, Gabriel, and Hongler (2018, Theorem 1) and uses only NTK-regime hypotheses on training dynamics.
+>
+> **Limit (ii): NTK kernel-regression solution $\to \Phi_*$.**
+>
+> As $n \to \infty$, $\Phi^{\mathrm{NTK}}_n \to \Phi^{\mathrm{NTK}}_*$ in $L^2(\mu \otimes \pi_\Theta)$, where $\Phi^{\mathrm{NTK}}_*$ is the **best $L^2$-approximation of $\Phi_*$ within the closure of $\mathrm{RKHS}(\mathrm{NTK})$**:
+> $$\Phi^{\mathrm{NTK}}_* \;=\; \mathop{\arg\min}_{\Phi \in \overline{\mathrm{RKHS}(\mathrm{NTK})}} \;d_{L^2}(\Phi, \Phi_*).$$
+> The further conclusion $\Phi^{\mathrm{NTK}}_* = \Phi_*$ ---i.e., that the kernel-regression limit recovers the true function--- requires the **additional source/smoothness hypothesis** that $\Phi_* \in \mathrm{RKHS}(\mathrm{NTK})$ with sufficient smoothness to satisfy the kernel's source condition (Caponnetto and De Vito 2007). **If $\Phi_* \notin \mathrm{RKHS}(\mathrm{NTK})$, only convergence to the projection $\Phi^{\mathrm{NTK}}_*$ holds**, and the gap $d_{L^2}(\Phi^{\mathrm{NTK}}_*, \Phi_*)$ is the **kernel approximation error** ---an irreducible bias of the NTK regime for the chosen architecture.
+
+*Reference and limitations.* The result is a specialization of Jacot, Gabriel, and Hongler (2018, Theorem 1) and Bach (2017, Theorem 5) to the AMM hypernetwork context. **Three substantive limitations:**
+
+(i) **The NTK regime is the lazy training regime**: it requires width $\to \infty$ with appropriate parameter scaling and small initial parameters. Practical hypernetworks of finite width and standard SGD operate **outside** the NTK regime; Theorem 6A gives an approximation whose quality depends on the gap between practical training and lazy training.
+
+(ii) **The RKHS of the NTK is restrictive**: it is a specific Hilbert space determined by the architecture. Functions $\Phi_*$ outside this RKHS may not be representable by the trained network in the NTK regime, even though the network has universal approximation capacity in the wide-width limit (Hornik 1991).
+
+(iii) **The rate of $\Phi^{\mathrm{NTK}}_n \to \Phi_*$ depends on the NTK** and on the smoothness of $\Phi_*$ in this specific RKHS. There is no universal rate analogous to the Stone-optimal $n^{-\beta/(2\beta+d)}$.
+
+**Practical implication.** Theorem 6A is a useful conceptual statement: it says that, in the wide-width lazy regime, the hypernetwork behaves like a specific kernel regression. But it does **not** give a universally applicable contraction rate or a finite-sample guarantee for typical Path 3 fits.
+
+---
+
+# **6. Theorem 6B: PAC-Bayes Generalization Bound (Non-Asymptotic)**
+
+> **Theorem 6B. Finite-sample PAC-Bayes bound (McAllester 1999; Dziugaite and Roy 2017).** Let $\pi(\phi)$ be a prior on $\phi$ chosen before observing the data, and $\widehat\Pi_n(\phi)$ any (data-dependent) posterior over $\phi$. Let $L(\phi) = \mathbb{E}_{(X, Y)}[\ell(Y, \Phi_\phi(X))]$ be the population risk and $\widehat L_n(\phi) = n^{-1} \sum_i \ell(Y_i, \Phi_\phi(X_i))$ the empirical risk. Suppose $\ell \in [0, 1]$ (or appropriately bounded). Then with probability at least $1 - \delta$ over the sample:
+> $$\mathbb{E}_{\widehat\Pi_n}[L(\phi)] \;\leq\; \mathbb{E}_{\widehat\Pi_n}[\widehat L_n(\phi)] \;+\; \sqrt{\frac{\mathrm{KL}(\widehat\Pi_n \,\|\, \pi) + \log(2 \sqrt{n} / \delta)}{2(n - 1)}}.$$
+
+*Argument.* Standard PAC-Bayes via concentration of the Rényi divergence; see Dziugaite and Roy (2017) for the deep-learning specialization with $\widehat\Pi_n$ realized as a Gaussian variational posterior.
+
+**What this gives Path 3.**
+
+- **A finite-sample bound on the gap** between empirical and population risk that the user can evaluate after fitting. Concretely: after running the SVI variational fit, the user computes the empirical risk on training data, the KL divergence between variational posterior and prior, and obtains a numerical upper bound on the population risk.
+- The bound is **tight enough to be informative** in many practical regimes (Dziugaite and Roy 2017 obtained vacuous-bound improvements that gave non-vacuous test-error bounds for MNIST-scale problems).
+
+**What this does not give.**
+
+- **An asymptotic contraction rate.** Theorem 6B is a finite-sample statement and does not directly yield a sequence $r_n \to 0$.
+- **A guarantee about the realized function $\Phi_\phi$ converging to $\Phi_*$.** It bounds population risk, which is a one-dimensional functional of $\Phi_\phi$, and does not control $d_{L^2}(\widehat\Phi_n, \Phi_*)$ directly.
+- **Uniform validity in $\phi$.** The bound is on the expected risk under $\widehat\Pi_n$, not on individual draws.
+
+**Operational use.** The library reports the PAC-Bayes bound as a **finite-sample quality certificate** alongside Path 3 fits. A small bound is evidence that the trained network has not overfit; a large bound is a warning that the empirical-risk minimizer may not generalize.
+
+---
+
+# **7. Proposition 6C: Infinite-Width Gaussian Process Limit (Characterization of the Prior)**
+
+> **Proposition 6C. Characterization of the prior in the infinite-width limit. Stated under (NN-LIM-INF-W).** Suppose the network has an infinite-width limit with NTK parametrization (or appropriate analog). Then the prior $\pi(\phi)$ on the network weights induces, **in this limit and at the level of the prior over functions**, a **Gaussian process prior** on the realized function:
+> $$\Phi_\phi \;\sim\; \mathrm{GP}(0, K_{\mathrm{NNGP}}) \qquad \text{(prior over functions, infinite-width limit)},$$
+> where $K_{\mathrm{NNGP}}$ is the **Neural Network Gaussian Process kernel** determined recursively by the architecture and the prior weight variances (Lee et al. 2018; Matthews et al. 2018).
+>
+> **Important: this is a statement about the prior, not about the posterior at finite width.** The infinite-width Gaussian process limit characterizes how the weight prior $\pi(\phi)$ translates into a function-space prior. The **posterior** under this prior, given finite data, is a separate question; in the infinite-width limit the posterior coincides with Gaussian-process-regression posterior (whose theory is mature), but **at finite width the posterior is not generally Gaussian** and the gap to the GP posterior is the subject of ongoing research (Hron et al. 2020 and (O5-Path3) below).
+
+*Reference.* Lee, Bahri, Novak, Schoenholz, Pennington, Sohl-Dickstein (2018) for the closed-form recursion of $K_{\mathrm{NNGP}}$; Matthews, Rowland, Hron, Turner, Ghahramani (2018) for the rigorous infinite-width limit theorem.
+
+**Implication for Path 3.** In the infinite-width limit, **Path 3 is asymptotically equivalent to a Gaussian process regression with the NNGP kernel**. The asymptotic theory of GP regression then transfers to Path 3 in this limit:
+
+- Posterior consistency at the GP regression rate (van der Vaart and van Zanten 2008).
+- Posterior contraction at smoothness-adaptive rates under appropriate kernel scaling.
+- Bernstein-von Mises for the parametric component of the GP posterior under standard regularity.
+
+**Crucial caveat: this is a characterization of the prior, not the posterior at finite width.** The infinite-width GP limit holds for the **prior over functions** induced by the network architecture and weight prior. **The posterior at finite width** ---which is what the user actually fits with `torch`--- has additional finite-width corrections that are not fully characterized. Hron et al. (2020) survey the partial results on finite-width Bayesian deep networks; the gap between infinite-width and finite-width is the subject of (O5-Path3).
+
+---
+
+# **8. Proposition 6D: Function-Level Consistency under Fixed Architecture (Partial)**
+
+> **Proposition 6D. Stated under (R-RANDOM) and (NN-LIM-FIX).** Suppose:
+>
+> - The hypernetwork has **fixed** architecture (depth $L$, widths $W_1, \ldots, W_L$, total parameters $P$).
+> - The prior $\pi(\phi)$ has positive density on a compact subset of $\mathbb{R}^P$.
+> - The negative log-likelihood is smooth in $\phi$ on this subset.
+> - The optimizer (or MCMC sampler) converges to **some stationary point or stationary distribution** of the empirical risk surface (no claim is made that the stationary point is a global minimum).
+>
+> Then, **as $n \to \infty$ with the architecture fixed**, the trained network's realized function converges to **a stationary limit** $\Phi^{(L, W_{1:L}), \text{stat}}_n$ within the function class realizable by the architecture:
+> $$\widehat\Phi_n \;\xrightarrow{P}\; \Phi^{(L, W_{1:L}), \text{stat}}_n,$$
+> where $\Phi^{(L, W_{1:L}), \text{stat}}_n$ corresponds to **a** (not necessarily global) minimizer of the empirical risk reachable by the optimizer from its initialization.
+>
+> The further claim that $\Phi^{(L, W_{1:L}), \text{stat}}_n$ converges to the **global** best $L^2(\mu \otimes \pi_\Theta)$-approximation
+> $$\Phi^{(L, W_{1:L})}_* \;=\; \mathop{\arg\min}_{\Phi_\phi : \phi \in \mathbb{R}^P} \;d_{L^2}(\Phi_\phi, \Phi_*)$$
+> requires the **additional global-optimality hypothesis** **(NN-OPT-GLOBAL)**: the optimizer (or sampler) reaches a global minimum of the empirical risk, not just a stationary point. **(NN-OPT-GLOBAL) is a strong condition** for non-convex losses (the typical case for neural networks) and is **not** generically satisfied; it can fail at saddle points and at non-global local minima created by the network's symmetries (Proposition 1F (ii)).
+
+*Reference and discussion.* This is M-estimator consistency (van der Vaart 1998, §5) applied to neural-network estimation under fixed architecture, **modified to honor the gap between stationary points and global optima** in non-convex landscapes.
+
+**Three points of substance:**
+
+(i) **The unconditional limit is a stationary point**, not the best architecture-realizable approximation. The two coincide only under (NN-OPT-GLOBAL).
+
+(ii) **Even under (NN-OPT-GLOBAL), the limit $\Phi^{(L, W_{1:L})}_*$ is not $\Phi_*$ in general.** It is the projection of $\Phi_*$ onto the realizable function class. If the architecture is too narrow or too shallow, the projection may differ substantially from $\Phi_*$; the gap is the **architecture approximation error**.
+
+(iii) **For the architecture approximation error to vanish**, $W_\ell$ must grow with $n$. This is the **growing-architecture regime**, which is a hybrid of (NN-LIM-FIX) and (NN-LIM-INF-W); the asymptotic theory in this regime is **not closed** and is part of (O3-Path3) below.
+
+(iv) **Convergence rate** to the stationary limit is parametric ($n^{-1/2}$) in $\phi$ under standard regularity, but network symmetries (Proposition 1F (ii)) make this convergence at the level of $\phi$ ambiguous; convergence at the level of $\Phi_\phi$ holds at parametric rate when the stationary point is locally identifiable up to symmetries.
+
+**Practical implication.** Proposition 6D is a useful conceptual statement with **two layers of caveat**: first, the empirical optimization may not find the global minimum (the architecture-realizable best approximation within the realizable class may itself be unreached); second, even if it is reached, the architecture may be too rigid to approach $\Phi_*$ (architecture approximation error of the realizable class). The framework reports both layers of error separately when feasible (using restart-based estimates of the gap to global optimum, plus comparison to NTK-regime fits as a check on architecture sufficiency). This is the formal version of two related practical concerns: "your optimizer might not have converged to a global minimum" and "your network might not be deep/wide enough".
+
+---
+
+# **9. Specialization to Block 3 Special Cases**
+
+Path 3 covers Proposition 3.7 of Block 3 (hypernetworks). The asymptotic results of this block specialize as:
+
+| Special Case | AMM Level | (L1) Consistency | (L2) Rate | (L3) BvM |
+|:-------------|:---------:|:----------------:|:---------:|:--------:|
+| Hypernetwork (Proposition 3.7) | $\infty$ | Theorem 6A (NTK) or Proposition 6D (fixed) under regime-specific hypotheses | NTK-determined or PAC-Bayes finite-sample (Theorem 6B); no universal rate | Open (O4-Path3); Proposition 6C characterizes the prior, not the posterior |
+
+The Path 1 and Path 2 special cases (Theorems 3.1-3.6) are **not** treated by Path 3 because they fall within the linear-class scope (LIN) of Block 1; using a hypernetwork for those cases is technically possible but operationally unnecessary, and the asymptotic theory of the simpler paths is more complete.
+
+---
+
+# **10. Open Questions**
+
+The open questions for Path 3 are substantively more numerous than for Paths 1-2, reflecting the genuinely open frontier of the asymptotic theory of neural networks.
+
+**(O1-Path3) General consistency outside the NTK regime.** Theorem 6A requires the NTK lazy regime; Proposition 6D requires fixed architecture. The realistic regime ---finite-but-large width, SGD with momentum and weight decay--- is **not covered** by either. General function-level consistency in this regime is an open problem.
+
+**(O2-Path3) Convergence rate under realistic optimization.** Most rate results assume gradient descent at vanishing step size or full-batch gradient. SGD with momentum, Adam, and other modern optimizers introduce additional dynamics whose asymptotic effects on the realized function are partially understood (Hardt, Recht, Singer 2016 for SGD generalization) but not fully characterized.
+
+**(O3-Path3) Adaptive contraction rates under unknown smoothness.** The rates derivable from Theorem 6A depend on the smoothness of $\Phi_*$ in the NTK RKHS, which is typically unknown. Adaptive priors and architectures that achieve the optimal rate without specifying the smoothness are an open question (relevant work: Polson and Sokolov 2017; Suzuki 2018 for adaptive deep learning).
+
+**(O4-Path3) Function-level Bernstein-von Mises.** A full BvM for the posterior over $\Phi_\phi$ in a function-space metric is **open**. The infinite-width GP limit (Proposition 6C) gives BvM only for the GP-projected functional, not the full network posterior.
+
+**(O5-Path3) Finite-width corrections to the infinite-width GP limit.** Proposition 6C holds in the infinite-width limit. At finite width, the network behaves differently; characterizing the gap is the subject of recent work (Hron et al. 2020; Naveh, Ringel 2021) but is not closed.
+
+**(O6-Path3) Quantification of network symmetries.** Proposition 1F (ii) of Block 1 notes that $\phi$ is non-identifiable due to permutation, sign, and rescaling symmetries. The **quantitative effect of these symmetries on optimizer convergence** ---specifically, how they create local minima or saddle points and how SGD navigates them--- is not fully characterized.
+
+**(O7-Path3) Out-of-distribution behavior of $\Phi_\phi$.** All asymptotic results are stated under the i.i.d. data-generating assumption. The behavior of the trained network on covariates outside $\mathrm{supp}(\mu)$ is **not** controlled by the asymptotic theory and is a separate domain (out-of-distribution generalization; recent work: Arjovsky et al. 2019; Nagarajan, Andreassen, Neyshabur 2021).
+
+**The framework reports these open questions explicitly to the user** when Path 3 is invoked, alongside the partial results above. The empirical discrimination protocol of Block 1 §6.8.1 provides operational diagnostics that compensate, in part, for the asymptotic gaps: stability across seeds (testing for symmetry-induced non-identifiability, related to (O6)); cross-validated OOS performance (testing generalization in the absence of asymptotic guarantees, related to (O1)-(O3)); calibration (testing posterior reliability in the absence of BvM, related to (O4)); Path 1 vs. Path 3 comparison (testing how much the gap to closed theory matters in practice).
+
+---
+
+# **11. Implementation Implications for Path 3 (`torch`)**
+
+The planned Path 3 implementation in `gdpar` will use the R `torch` package (LibTorch backend), supporting both SGD-based ERM training and SVI Bayesian variational inference. The current release (`0.0.0.9001`) does not ship this path; the design notes below specify the contract the operational layer will honour when it lands.
+
+### **11.1. Prior Specification (Bayesian Variant)**
+
+The default prior will be **NTK parametrization with Gaussian per-layer weights** of variance $\sigma_\ell^2 / W_\ell$. This places Path 3 in the scope of Theorem 6A in the wide-width limit and Proposition 6C in the infinite-width limit. Alternative parametrizations (mean-field, finite-width with explicit prior on each weight) will be available via configuration.
+
+### **11.2. PAC-Bayes Bound Reporting (Theorem 6B)**
+
+After training, the planned library will compute the PAC-Bayes bound of Theorem 6B with $\delta = 0.05$ as a **finite-sample quality certificate**. The planned report will include:
+- Empirical risk $\widehat L_n$.
+- KL divergence $\mathrm{KL}(\widehat\Pi_n \,\|\, \pi)$ (computed from the variational posterior).
+- The bound on $\mathbb{E}_{\widehat\Pi_n}[L(\phi)]$ at confidence $1 - \delta$.
+
+If the bound is large relative to the desired prediction accuracy, the planned interface will warn the user that the trained network may not generalize.
+
+### **11.3. NTK Diagnostic**
+
+The planned library will compute the **NTK at initialization** for the chosen architecture and report its eigenvalue spectrum. The decay rate of the spectrum determines the smoothness class of functions that Theorem 6A can recover; a slowly decaying spectrum indicates a wide RKHS (more flexible Path 3 fit), a quickly decaying spectrum indicates a restrictive RKHS (the architecture may be too rigid for the target $\Phi_*$).
+
+### **11.4. Discrimination Protocol Cross-Reference**
+
+The framework's empirical discrimination protocol of Block 1 §6.8.1 (four steps: stability across seeds, OOS comparison, calibration, component-wise divergence) is the **operational mechanism by which Path 3's asymptotic gaps will be surfaced**. The planned library will run the protocol automatically when Path 3 is fit and Path 1 is feasible on the same data, and will report the verdict (richer structure / non-identifiability / model misspecified) with the corresponding recommendation.
+
+### **11.5. (REG-EST) of Block 2 Specialized to Path 3**
+
+Path 3 supports **only the average-error form** of (REG-EST), and even this requires the partial results above. Specifically:
+
+- Under Theorem 6A (NTK regime): $n^{-1} \sum_i \|\widehat\theta_i^{\,\text{NN}} - \theta_*(x_i, \theta_{\text{ref}})\| \to 0$ holds in $P_{\eta_*}$-probability, provided $\Phi_* \in \mathrm{RKHS}(\mathrm{NTK})$.
+- Under Proposition 6D (fixed architecture): the same average-error form holds for the projection $\Phi^{(L, W_{1:L})}_*$ rather than $\Phi_*$ itself; the architecture approximation error appears as an irreducible bias.
+- Under Theorem 6B (PAC-Bayes): a finite-sample bound on the average risk, which translates into a bound on the average error under appropriate loss conditions.
+
+**The strictly stronger uniform-in-$i$ version of (REG-EST)** ---$\sup_i \|\widehat\theta_i - \theta_*(x_i, \theta_{\text{ref}})\| \to 0$--- is **not established** for Path 3 in general. Lemma 2B of Block 2 invokes only the average-error form, so this gap does not invalidate Lemma 2B; it does mean that uniform-in-$i$ statements about Path 3's individual fits are not currently supported by closed asymptotic theory.
+
+---
+
+# **12. Summary**
+
+This block has established for Path 3:
+
+1. **Three asymptotic layers** ---function-level consistency (L1), convergence rate (L2), BvM analog (L3)--- and an explicit assessment that **none of the three is closed in general** for Path 3, with (L1) and (L2) covered partially by regime-specific results and (L3) largely open.
+
+2. **Standing asymptotic hypotheses** ---(NN-ARCH), (NN-PRIOR-SCALE), (NN-OPT), (NN-LIM)--- nominated, with (NN-LIM) further decomposed into four mutually exclusive sub-regimes (NTK, mean-field, fixed, infinite-width).
+
+3. **Theorem 6A (NTK consistency)** in the lazy regime, with **three substantive limitations** explicitly recognized.
+
+4. **Theorem 6B (PAC-Bayes bound)** as a finite-sample non-asymptotic quality certificate, with explicit recognition that it does not yield a contraction rate.
+
+5. **Proposition 6C (Infinite-width GP limit)** as a characterization of the **prior**, not the posterior at finite width, with the gap to finite-width acknowledged.
+
+6. **Proposition 6D (Fixed-architecture consistency)** with the limit being the best architecture-realizable approximation of $\Phi_*$, not $\Phi_*$ itself.
+
+7. **Seven explicitly recognized open questions** (general consistency outside NTK, realistic optimizer dynamics, adaptive rates, function-level BvM, finite-width corrections, quantification of symmetries, OOD behavior).
+
+8. **Implementation diagnostics** for Path 3 in `torch`, including the NTK eigenvalue spectrum, the PAC-Bayes bound report, and cross-reference to the empirical discrimination protocol of Block 1 §6.8.1 as the operational substitute for closed asymptotic guarantees.
+
+The block does not pretend to give a complete asymptotic theory of Path 3 ---**none currently exists**--- and is honest about what is established, what is conjectural, and what remains genuinely open. **The framework's recommendation is that Path 3 be used as a complement to Path 1, not as a stand-alone path with full asymptotic backing**, except in regimes where the partial results of this block apply (lazy NTK regime; PAC-Bayes finite-sample bound that the user evaluates explicitly; infinite-width GP limit when justified by the architecture).
+
+---
+
+# **13. Connections to Subsequent Blocks**
+
+- **Block 7** (Empirical Bayes vs. Fully Bayes) interacts with this block via the choice of how $\theta_{\text{ref}}$ is treated under Path 3: either as a hyperparameter fit empirically alongside the network parameters (EB), or as a parameter with its own prior fit jointly (FB). The asymptotic implications differ between the two.
+- **Block 8** (CATE/ITE positioning) places Path 3 in the context of neural-network-based heterogeneous treatment effect estimators (e.g., causal forests with neural extensions; deep IV); the asymptotic theory of these estimators inherits the gaps of Path 3.
+
+---
+
+# **Appendix A. Asymptotic Notation for Path 3**
+
+| Symbol | Meaning |
+|:-------|:--------|
+| $\Phi_\phi$ | Realized function of the hypernetwork |
+| $\widehat\Phi_n = \Phi_{\widehat\phi_n}$ | Trained realized function |
+| $\Phi_*$ | True realized function |
+| $\Phi^{(L, W_{1:L})}_*$ | Best architecture-realizable approximation of $\Phi_*$ |
+| $\Phi^{\mathrm{NTK}}_n$ | NTK kernel-regression solution |
+| $\mathrm{NTK}$ | Neural Tangent Kernel |
+| $\mathrm{NNGP}$ | Neural Network Gaussian Process kernel |
+| $K_{\mathrm{NNGP}}$ | NNGP kernel function |
+| $\widehat\Pi_n(\phi)$ | (Variational) posterior on $\phi$ |
+| $L(\phi), \widehat L_n(\phi)$ | Population and empirical risk at parameter $\phi$ |
+| $\mathrm{RKHS}(\mathrm{NTK})$ | RKHS associated with the NTK |
+| $P$ | Number of network parameters |
+| $L$ | Network depth |
+| $W_\ell$ | Width of layer $\ell$ |
+
+---
+
+# **Appendix B. Asymptotic Hypothesis Table for Path 3**
+
+| Hypothesis | Content | Used by |
+|:-----------|:--------|:--------|
+| (R-RANDOM) | Random design as in Block 4 §2.1.1 | Default for §5-8 |
+| (R-COND) | Fixed/conditional design | Variant for §5-8 |
+| (NN-ARCH) | Finite depth $L$, per-layer widths $W_\ell$, smooth or piecewise-linear activations | All theorems |
+| (NN-PRIOR-SCALE) | Per-layer prior variance $\sigma_\ell^2 / W_\ell$ (NTK) or $\sigma_\ell^2 / W_\ell^2$ (mean-field) | Theorems 6A, 6B, 6C, 6D |
+| (NN-OPT) | Optimizer / sampler converges to **a** stationary point / distribution (not necessarily global optimum) | All theorems |
+| (NN-OPT-GLOBAL) | Optimizer / sampler reaches the **global** minimum of the empirical risk; strong condition for non-convex losses | Proposition 6D when limit is the best architecture-realizable approximation |
+| (NN-LIM-NTK) | Width $\to \infty$, lazy regime | Theorem 6A |
+| (NN-LIM-MF) | Mean-field regime | Not stated; reference to literature |
+| (NN-LIM-FIX) | Fixed architecture | Proposition 6D |
+| (NN-LIM-INF-W) | Infinite-width Gaussian process limit | Proposition 6C |
+
+---
+
+# **References Cited in This Block**
+
+Arjovsky, M., Bottou, L., Gulrajani, I., and Lopez-Paz, D. (2019). Invariant risk minimization. arXiv:1907.02893.
+
+Bach, F. (2017). Breaking the curse of dimensionality with convex neural networks. *Journal of Machine Learning Research*, 18, 1--53.
+
+Caponnetto, A., and De Vito, E. (2007). Optimal rates for the regularized least-squares algorithm. *Foundations of Computational Mathematics*, 7(3), 331--368.
+
+Chizat, L., and Bach, F. (2018). On the global convergence of gradient descent for over-parameterized models using optimal transport. *NeurIPS 2018*.
+
+Dziugaite, G. K., and Roy, D. M. (2017). Computing nonvacuous generalization bounds for deep (stochastic) neural networks with many more parameters than training data. *Proceedings of UAI*.
+
+Hardt, M., Recht, B., and Singer, Y. (2016). Train faster, generalize better: stability of stochastic gradient descent. *ICML 2016*.
+
+Hornik, K. (1991). Approximation capabilities of multilayer feedforward networks. *Neural Networks*, 4(2), 251--257.
+
+Hron, J., Bahri, Y., Sohl-Dickstein, J., and Novak, R. (2020). Infinite attention: NNGP and NTK for deep attention networks. *ICML 2020*.
+
+Jacot, A., Gabriel, F., and Hongler, C. (2018). Neural tangent kernel: convergence and generalization in neural networks. *NeurIPS 2018*.
+
+Lee, J., Bahri, Y., Novak, R., Schoenholz, S., Pennington, J., and Sohl-Dickstein, J. (2018). Deep neural networks as Gaussian processes. *ICLR 2018*.
+
+Matthews, A. G. de G., Rowland, M., Hron, J., Turner, R. E., and Ghahramani, Z. (2018). Gaussian process behaviour in wide deep neural networks. *ICLR 2018*.
+
+McAllester, D. A. (1999). PAC-Bayesian model averaging. *Proceedings of COLT*.
+
+Mei, S., Montanari, A., and Nguyen, P.-M. (2018). A mean field view of the landscape of two-layer neural networks. *PNAS*, 115(33), E7665--E7671.
+
+Nagarajan, V., Andreassen, A., and Neyshabur, B. (2021). Understanding the failure modes of out-of-distribution generalization. *ICLR 2021*.
+
+Naveh, G., and Ringel, Z. (2021). A self-consistent theory for finite-width neural networks. *NeurIPS 2021*.
+
+Polson, N. G., and Sokolov, V. (2017). Deep learning: a Bayesian perspective. *Bayesian Analysis*, 12(4), 1275--1304.
+
+Suzuki, T. (2018). Adaptivity of deep ReLU network for learning in Besov and mixed smooth Besov spaces: optimal rate and curse of dimensionality. *ICLR 2018*.
+
+van der Vaart, A. W. (1998). *Asymptotic Statistics*. Cambridge University Press.
+
+van der Vaart, A. W., and van Zanten, J. H. (2008). Rates of contraction of posterior distributions based on Gaussian process priors. *Annals of Statistics*, 36(3), 1435--1463.
