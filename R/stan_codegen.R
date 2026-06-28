@@ -1792,12 +1792,6 @@ generate_stan_code_KxP_FB <- function(prior, cp_W = FALSE,
                                chains = 2L,
                                seed = 91001L,
                                refresh = 0L, ...) {
-  if (!requireNamespace("cmdstanr", quietly = TRUE)) {
-    gdpar_abort(
-      "Package 'cmdstanr' is required for .gdpar_fb_KxP_fit().",
-      class = "gdpar_unsupported_feature_error"
-    )
-  }
   assert_inherits(family, "gdpar_family", "family")
   if (!is.list(amm_list) || length(amm_list) < 2L) {
     gdpar_abort(
@@ -1846,6 +1840,12 @@ generate_stan_code_KxP_FB <- function(prior, cp_W = FALSE,
   prior <- gdpar_prior()
   stan_src <- generate_stan_code_KxP_FB(prior, cp_W = FALSE, family = family)
   stan_path <- write_stan_to_tempfile(stan_src)
+  if (!requireNamespace("cmdstanr", quietly = TRUE)) {
+    gdpar_abort(
+      "Package 'cmdstanr' is required for .gdpar_fb_KxP_fit().",
+      class = "gdpar_unsupported_feature_error"
+    )
+  }
   model <- cmdstanr::cmdstan_model(stan_path, compile = TRUE, quiet = TRUE)
   # Conservative cmdstanr init: the canonical KxP piece composes
   # Path A multivariate with Path B distributional regression; the

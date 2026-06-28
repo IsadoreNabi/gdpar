@@ -214,8 +214,6 @@ gdpar_eb <- function(formula,
 
   if (is.null(prior)) prior <- gdpar_prior()
   assert_inherits(prior, "gdpar_prior", "prior")
-  require_suggested("cmdstanr",
-                    "fit Path 1 Empirical-Bayes models via cmdstanr::laplace()")
 
   lc <- .gdpar_eb_resolve_laplace_control(laplace_control)
 
@@ -422,6 +420,8 @@ gdpar_eb <- function(formula,
     family = family
   )
   marginal_path <- write_stan_to_tempfile(marginal_src)
+  require_suggested("cmdstanr",
+                    "fit Path 1 Empirical-Bayes models via cmdstanr::laplace()")
   marginal_model <- cmdstanr::cmdstan_model(marginal_path)
 
   laplace_result <- .gdpar_eb_maximize_marginal(
@@ -1814,6 +1814,8 @@ gdpar_eb <- function(formula,
     family = family
   )
   marginal_path <- write_stan_to_tempfile(marginal_src)
+  require_suggested("cmdstanr",
+                    "fit Path 1 Empirical-Bayes models via cmdstanr::laplace()")
   marginal_model <- cmdstanr::cmdstan_model(marginal_path)
   laplace_result <- .gdpar_eb_maximize_marginal(
     model     = marginal_model,
@@ -3103,6 +3105,8 @@ gdpar_eb <- function(formula,
     family = family
   )
   marginal_path <- write_stan_to_tempfile(marginal_src)
+  require_suggested("cmdstanr",
+                    "fit Path 1 Empirical-Bayes models via cmdstanr::laplace()")
   marginal_model <- cmdstanr::cmdstan_model(marginal_path)
   laplace_result <- .gdpar_eb_maximize_marginal_KxP(
     model     = marginal_model,

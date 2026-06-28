@@ -1,4 +1,7 @@
 ^HANDOFF_PROMPT.*\.md$
+^cran-comments\.md$
+^gdpar\.Rcheck$
+^gdpar_.*\.tar\.gz$
 ^\.Rhistory$
 ^\.Rproj\.user$
 ^.*\.Rproj$

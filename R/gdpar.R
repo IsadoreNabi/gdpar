@@ -588,8 +588,6 @@ gdpar <- function(formula, family = gdpar_family("gaussian"),
       class = "gdpar_input_error"
     )
   }
-  require_suggested("cmdstanr",
-                    "fit Path 1 hierarchical Bayesian models")
   outcome_name <- as.character(formula[[2]])
   if (!outcome_name %in% colnames(data)) {
     gdpar_abort(
@@ -691,6 +689,8 @@ gdpar <- function(formula, family = gdpar_family("gaussian"),
     cp_W = parametrization_resolved$cp_W
   )
   stan_path <- write_stan_to_tempfile(stan_src)
+  require_suggested("cmdstanr",
+                    "fit Path 1 hierarchical Bayesian models")
   cs_model <- cmdstanr::cmdstan_model(stan_path)
   sample_args <- list(
     data            = stan_data,
@@ -806,8 +806,6 @@ gdpar <- function(formula, family = gdpar_family("gaussian"),
       class = "gdpar_input_error"
     )
   }
-  require_suggested("cmdstanr",
-                    "fit Path 1 hierarchical Bayesian models")
   p <- amm$p
   if (inherits(family, "gdpar_family") &&
       !inherits(family, "gdpar_family_multi")) {
@@ -1006,6 +1004,8 @@ gdpar <- function(formula, family = gdpar_family("gaussian"),
     )
   }
   stan_path <- write_stan_to_tempfile(stan_src)
+  require_suggested("cmdstanr",
+                    "fit Path 1 hierarchical Bayesian models")
   cs_model <- cmdstanr::cmdstan_model(stan_path)
   sample_args <- list(
     data            = stan_data,
@@ -1126,8 +1126,6 @@ gdpar <- function(formula, family = gdpar_family("gaussian"),
       class = "gdpar_input_error"
     )
   }
-  require_suggested("cmdstanr",
-                    "fit Path 1 hierarchical Bayesian models")
   bd <- .gdpar_K_build(
     amm_list_canonical = amm_list_canonical, family = family,
     data = data, prior = prior, anchor = anchor,
@@ -1293,8 +1291,6 @@ gdpar <- function(formula, family = gdpar_family("gaussian"),
   if (is.null(prior)) {
     prior <- gdpar_prior()
   }
-  require_suggested("cmdstanr",
-                    "fit Path 1 hierarchical Bayesian models")
   slot_names <- names(amm_list_canonical)
   K <- length(amm_list_canonical)
   if (!outcome_name %in% colnames(data)) {
@@ -1496,6 +1492,8 @@ gdpar <- function(formula, family = gdpar_family("gaussian"),
     family     = family
   )
   stan_path <- write_stan_to_tempfile(stan_src)
+  require_suggested("cmdstanr",
+                    "fit Path 1 hierarchical Bayesian models")
   cs_model <- if (isTRUE(compile_model_methods)) {
     cmdstanr::cmdstan_model(stan_path, compile_model_methods = TRUE)
   } else {

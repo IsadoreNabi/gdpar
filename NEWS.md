@@ -9,6 +9,13 @@ Bayesian inference through 'Stan' / 'cmdstanr'); Paths 2 (varying-coefficient)
 and 3 (hypernetwork) are specified at reference grade and queued for future
 versions.
 
+Packaging note (pre-CRAN correction): the fitting entry points now run all
+input validation before the optional `cmdstanr` dependency is required, which
+is checked only immediately before it is used. The package and its full test
+suite therefore work on machines where the `Suggests` package `cmdstanr` is not
+installed. This is a packaging-only change with no effect on results when
+`cmdstanr` is available.
+
 This release consolidates the development cycles documented in detail below
 (Sessions 8.3--8.6, the Block 8.4 audit, and the Block 9 re-validation):
 
