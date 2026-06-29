@@ -18,4 +18,5 @@
 ^inst/benchmarks/results/manifest_9_2_O.*\.csv$
 ^inst/benchmarks/results/run_recovery_9_2.*\.log$
 ^inst/benchmarks/results/batch.*_stdout\.log$
+^inst/benchmarks/results/ebird_9_2_O_data\.rds$
 ^tests/testthat/data/golden_.*\.rds$

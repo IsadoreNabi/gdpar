@@ -4,7 +4,7 @@ Title: General Dynamic Parameter Models via Reference Anchoring
 Version: 0.1.0
 Authors@R:
     person("José Mauricio", "Gómez Julián",
-           email = "isadorenabi@pm.me",
+           email = "isadore.nabi@pm.me",
            role = c("aut", "cre"),
            comment = c(ORCID = "0009-0000-2412-3150"))
 Description: Implements a unified predictive framework in which individual
@@ -18,7 +18,8 @@ Description: Implements a unified predictive framework in which individual
     provides identifiability diagnostics, validity tests for the
     population reference, and benchmarks against canonical zero-inflated
     count datasets and avian abundance data from the eBird Status and
-    Trends project.
+    Trends project. The framework and its estimation paths are described
+    in Gomez Julian (2026) <doi:10.5281/zenodo.21046269>.
 License: GPL (>= 3)
 Encoding: UTF-8
 URL: https://github.com/IsadoreNabi/gdpar
